@@ -23,10 +23,12 @@ class TableMetadata:
         schema: str,
         name: str,
         columns: Tuple[str, ...],
+        primary_key: Tuple[str, ...],
     ) -> None:
         self.schema = schema
         self.name = name
         self.columns = columns
+        self.primary_key = primary_key
         self.foreign_keys: List[ForeignKey] = []
         self.rev_foreign_keys: List[ForeignKey] = []
 
@@ -52,6 +54,7 @@ class DatabaseMetadata:
                     schema=schema,
                     name=table_name,
                     columns=tuple(column["name"] for column in inspector.get_columns(table_name, schema=schema)),
+                    primary_key=tuple(inspector.get_pk_constraint(table_name, schema=schema).get("constrained_columns", [])),
                 )
 
         for table in meta.tables.values():
@@ -68,6 +71,33 @@ class DatabaseMetadata:
                 )
 
         return meta
+
+    def infer_missing_foreign_keys(self) -> None:
+        pk_map = {}
+        for table in self.tables.values():
+            if not table.primary_key:
+                continue
+            if table.primary_key in pk_map:
+                print(f"Duplicate primary key columsn found {table.primary_key!r}")
+                pk_map[(table.schema, table.primary_key)] = None
+            else:
+                pk_map[(table.schema, table.primary_key)] = table
+
+        # Only infer single column primary keys
+        for table in self.tables.values():
+            fks = set(table.foreign_keys)
+            for col in table.columns:
+                dst_table = pk_map.get((table.schema, (col, )))
+                if dst_table is not None and dst_table is not table:
+                    fk = ForeignKey(
+                        columns=(col, ),
+                        dst_schema=dst_table.schema,
+                        dst_table=dst_table.name,
+                        dst_columns=(col, ),
+                    )
+                    if fk not in fks:
+                        print(f"Inferring foreign key {table}->{dst_table} on {fk.columns!r}")
+                        table.foreign_keys.append(fk)
 
     def add_foreign_key(
         self, schema: str, table_name: str, foreign_key: ForeignKey

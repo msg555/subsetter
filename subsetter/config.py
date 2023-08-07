@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field
 
 
 class TargetConfig(BaseModel):
-    percent: float
+    percent: Optional[float] = None
+    amount: Optional[int] = None
 
 
 class IgnoreFKConfig(BaseModel):
@@ -24,6 +25,12 @@ class SourceConfig(BaseModel):
     port: Optional[int] = None
     username: Optional[str] = None
     password: Optional[str] = None
+
+
+class ColumnConstraint(BaseModel):
+    column: str
+    operator: Literal["<", ">", "=", "<>", "!=", "in", "not in"]
+    expression: Union[float, str, List[Union[float, str]]]
 
 
 class DirectoryOutputConfig(BaseModel):
@@ -47,6 +54,9 @@ OutputType = Annotated[
 class SubsetConfig(BaseModel):
     source: SourceConfig = SourceConfig()
     destination: OutputType = DirectoryOutputConfig(mode="directory", directory="output")
+
+    global_constraints: List[ColumnConstraint] = []
+    table_constraints: Dict[str, List[ColumnConstraint]] = {}
 
     schemas: List[str]
     targets: Dict[str, TargetConfig]

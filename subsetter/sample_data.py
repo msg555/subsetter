@@ -155,8 +155,13 @@ class Subsetter:
         self.meta = DatabaseMetadata.from_engine(self.engine, self.config.schemas)
 
         # TODO: Fix doing this before below toposort. Problem with test db
+        self.meta.infer_missing_foreign_keys()
         self._remove_ignore_fks()
         self._add_extra_fks()
+
+        # TODO: remove
+        with open("graph.dot", "w", encoding="utf-8") as fgraph:
+            self.meta.output_graphviz(fgraph)
 
         true_table_order = self.meta.toposort()
         print(" done!")
@@ -164,9 +169,6 @@ class Subsetter:
         self._check_ignore_tables()
         self._check_passthrough_tables()
 
-        # TODO: remove
-        with open("graph.dot", "w", encoding="utf-8") as fgraph:
-            self.meta.output_graphviz(fgraph)
 
         # TODO: Allow externally specifiying order
         order = self._solve_order()
@@ -182,7 +184,10 @@ class Subsetter:
 
         output_queries = {}
         for schema, table_name in self.passthrough_tables:
-            output_queries[(schema, table_name)] = f"SELECT * FROM {_mysql_table_name(schema, table_name)}"
+            output_queries[(schema, table_name)] = (
+                f"SELECT * FROM {_mysql_table_name(schema, table_name)}",
+                {},
+            )
 
         processed = set()
         remaining = {_parse_table_name(table) for table in order}
@@ -202,7 +207,7 @@ class Subsetter:
             for table in true_table_order:
                 query = output_queries.get((table.schema, table.name))
                 if query is not None:
-                    self._output_table(conn, table, query)
+                    self._output_table(conn, table, query[0], query[1])
 
     def _solve_order(self) -> List[Tuple[str, str]]:
         """
@@ -267,7 +272,7 @@ class Subsetter:
                 if (fk.dst_schema, fk.dst_table) in self.ignore_tables:
                     raise ValueError(
                         f"Foreign key from {table.schema!r}.{table.name!r} into"
-                        f" ignored table {fk.dst_schema!r}.{fk.dst_name!r}"
+                        f" ignored table {fk.dst_schema!r}.{fk.dst_table!r}"
                     )
 
     def _check_passthrough_tables(self) -> None:
@@ -288,9 +293,9 @@ class Subsetter:
         conn,
         table: TableMetadata,
         query: str,
+        params: dict,
     ) -> None:
-        print("MAKING QUERY", query)
-        result = conn.execute(sa.text(query))
+        result = conn.execute(sa.text(query), params)
 
         rows = 0
         def _count_rows():
@@ -309,9 +314,10 @@ class Subsetter:
         processed: Set[Tuple[str, str]],
         remaining: Set[Tuple[str, str]],
         target: Optional[TargetConfig] = None,
-    ) -> str:
+    ) -> Tuple[str, dict]:
         need_temp = False
-        constraints = []
+        or_constraints = []
+        final_clause = ""
         for fk in table.foreign_keys + table.rev_foreign_keys:
             dst_key = (fk.dst_schema, fk.dst_table)
             if dst_key not in processed:
@@ -319,23 +325,40 @@ class Subsetter:
                     need_temp = True
                 continue
 
-            constraints.append(
+            or_constraints.append(
                 f"{_mysql_column_list(fk.columns)} IN (SELECT {_mysql_column_list(fk.dst_columns)} "
                 f"FROM {_mysql_table_name(fk.dst_schema, fk.dst_table + '_tmp')})"
             )
 
-        if target is not None:
-            constraints.append(f"rand() < {target.percent / 100.0}")
-        if not constraints:
-            constraints.append("1")
+        params = {}
+        and_constraints = []
 
-        query = f"SELECT * FROM {_mysql_table_name(table.schema, table.name)} WHERE {' OR '.join(constraints)}"
+        if True or not table.rev_foreign_keys:
+            conf_constraints = self.config.global_constraints + self.config.table_constraints.get(f"{table.schema}.{table.name}", [])
+            for conf_constraint in conf_constraints:
+                if conf_constraint.column in table.columns:
+                    print("Applying constraints to", table)
+                    param_name = f"param_{len(params)}"
+                    and_constraints.append(f"{_mysql_identifier(conf_constraint.column)} {conf_constraint.operator} :{param_name}")
+                    params[param_name] = conf_constraint.expression
+
+        if target is not None:
+            if target.percent is not None:
+                or_constraints.append(f"rand() < {target.percent / 100.0}")
+            elif target.amount is not None:
+                final_clause = f"ORDER BY rand() LIMIT {target.amount}"
+        if not or_constraints:
+            or_constraints.append("1")
+        if not and_constraints:
+            and_constraints.append("1")
+
+        query = f"SELECT * FROM {_mysql_table_name(table.schema, table.name)} WHERE ({' OR '.join(or_constraints)}) AND {' AND '.join(and_constraints)} {final_clause}"
         if need_temp:
             query = f"CREATE TEMPORARY TABLE {_mysql_table_name(table.schema, table.name + '_tmp')} {query}"
 
             print("Creating temp lookup table for", table)
             try:
-                result = conn.execute(sa.text(query))
+                result = conn.execute(sa.text(query), params)
             except Exception as exc:
                 # Some client/server combinations report a read-only error even though the temporary
                 # table creation actually succeeded. We'll just swallow the error here and if there
@@ -343,9 +366,9 @@ class Subsetter:
                 if "--read-only" not in str(exc):
                     raise
 
-            return f"SELECT * FROM {_mysql_table_name(table.schema, table.name + '_tmp')}"
+            return f"SELECT * FROM {_mysql_table_name(table.schema, table.name + '_tmp')}", {}
         else:
-            return query
+            return query, params
 
 
 def main() -> None:
