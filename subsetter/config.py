@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Literal, Annotated, Union
+from typing import Annotated, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -51,9 +51,12 @@ OutputType = Annotated[
     Field(..., discriminator="mode"),
 ]
 
+
 class SubsetConfig(BaseModel):
     source: SourceConfig = SourceConfig()
-    destination: OutputType = DirectoryOutputConfig(mode="directory", directory="output")
+    destination: OutputType = DirectoryOutputConfig(
+        mode="directory", directory="output"
+    )
 
     global_constraints: List[ColumnConstraint] = []
     table_constraints: Dict[str, List[ColumnConstraint]] = {}

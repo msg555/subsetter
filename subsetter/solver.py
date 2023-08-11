@@ -1,5 +1,6 @@
 import copy
-from typing import Dict, TypeVar, Optional, List, Set
+import json
+from typing import Dict, List, Optional, Set, TypeVar
 
 NodeT = TypeVar("NodeT")
 GraphT = Dict[NodeT, List[NodeT]]
@@ -11,7 +12,7 @@ class InversionException(Exception):
 
 def dfs(
     G: GraphT,
-    u: NodeT, 
+    u: NodeT,
     *,
     visited: Optional[Dict[NodeT, int]] = None,
     avoid: Optional[Set[NodeT]] = None,
@@ -45,32 +46,34 @@ def reverse_graph(G: GraphT, *, union=False) -> GraphT:
     return RG
 
 
-def invert_edges_into(G: GraphT, u: NodeT) -> Optional[GraphT]:
+def invert_edges_into(G: GraphT, u: NodeT) -> GraphT:
     G = copy.deepcopy(G)
     RG = reverse_graph(G)
-    visited = {}
+    parent: Dict[NodeT, Optional[NodeT]] = {}
 
-    def invert_dfs(u: NodeT, *, p: Optional[NodeT] = None):
-        if u in visited:
+    def invert_dfs(u: NodeT, *, p: Optional[NodeT] = None) -> None:
+        if u in parent:
             path_u = []
-            v = u
-            while v is not None:
-                path_u.append(v)
-                v = visited[v]
+            u_link: Optional[NodeT] = u
+            while u_link is not None:
+                path_u.append(u_link)
+                u_link = parent[u_link]
 
             path_p = [u]
-            v = p
-            while v is not None:
-                path_p.append(v)
-                v = visited[v]
+            u_link = p
+            while u_link is not None:
+                path_p.append(u_link)
+                u_link = parent[u_link]
 
             while len(path_u) > 1 and path_u[-2:] == path_p[-2:]:
                 path_p.pop()
                 path_u.pop()
-            
-            raise InversionException(f"Inverting edges creates cycle: {'->'.join(path_u)} and {'->'.join(path_p)}")
-        visited[u] = p
-        G[u] = [v for v in G[u] if v not in visited]
+
+            raise InversionException(
+                f"Inverting edges creates cycle: {'->'.join(str(u) for u in path_u)} and {'->'.join(str(u) for u in path_p)}"
+            )
+        parent[u] = p
+        G[u] = [v for v in G[u] if v not in parent]
         G[u].extend(RG[u])
         for v in RG[u]:
             invert_dfs(v, p=u)
@@ -120,7 +123,7 @@ def order_graph(G: Dict[NodeT, List[NodeT]], source: NodeT) -> List[NodeT]:
         options.add(u)
 
         # Find all nodes still reachable from source
-        visited = {}
+        visited: Dict[NodeT, int] = {}
         dfs(G_uni, source, visited=visited, avoid={u})
 
         # Find remaining subgraph and attempt to invert edges
@@ -140,7 +143,6 @@ def order_graph(G: Dict[NodeT, List[NodeT]], source: NodeT) -> List[NodeT]:
 
 
 def main():
-    import json
     with open("graph.json", "r", encoding="utf-8") as fgraph:
         graph = json.load(fgraph)
 

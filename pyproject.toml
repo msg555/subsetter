@@ -1,0 +1,50 @@
+[tool.isort]
+profile = "black"
+known_first_party = ["subsetter"]
+
+[tool.pylint.'MESSAGE CONTROL']
+enable = [
+    "use-symbolic-message-instead",
+]
+
+disable = [
+    # Re-enable docstring checkers eventually
+    "missing-function-docstring",
+    "missing-class-docstring",
+
+    "attribute-defined-outside-init",
+    "duplicate-code",
+    "invalid-name",
+    "protected-access",
+    "too-few-public-methods",
+    "too-many-branches",
+    "too-many-locals",
+    "too-many-statements",
+    "too-many-nested-blocks",
+    "too-many-return-statements",
+    "too-many-instance-attributes",
+    "too-many-arguments",
+    "consider-using-assignment-expr",
+    "use-dict-literal",
+    # handled by black
+    "format",
+    "missing-module-docstring",
+    "fixme",
+
+    "deprecated-typing-alias",
+    "consider-alternative-union-syntax",
+]
+
+[tool.pylint.MASTER]
+load-plugins = [
+    "pylint.extensions.check_elif",
+    "pylint.extensions.bad_builtin",
+    "pylint.extensions.code_style",
+    "pylint.extensions.overlapping_exceptions",
+    "pylint.extensions.typing",
+    "pylint.extensions.redefined_variable_type",
+    "pylint_pydantic",
+]
+extension-pkg-allow-list = [
+    "pydantic",
+]
