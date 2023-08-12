@@ -245,7 +245,9 @@ class Sampler:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
 
     with open("sampler_config.yaml", "r", encoding="utf-8") as fconfig:
         config = SamplerConfig.parse_obj(yaml.safe_load(fconfig))

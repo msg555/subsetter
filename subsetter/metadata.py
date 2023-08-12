@@ -218,11 +218,6 @@ class DatabaseMetadata:
                         )
                         table.foreign_keys.append(fk)
 
-    def add_foreign_key(
-        self, schema: str, table_name: str, foreign_key: ForeignKey
-    ) -> None:
-        self.tables[(schema, table_name)].foreign_keys.append(foreign_key)
-
     def normalize_foreign_keys(self) -> None:
         fk_sets = {
             table_key: {

@@ -90,6 +90,9 @@ class Planner:
         self.meta = meta
         LOGGER.info("done!")
 
+        for schema, table_name in meta.tables:
+            if (schema, table_name) not in extra_tables:
+                LOGGER.info("Selected table %s.%s", schema, table_name)
         for extra_table in extra_tables:
             LOGGER.info(
                 "Selected additional table %s.%s referenced by foreign keys",
@@ -160,9 +163,23 @@ class Planner:
         for extra_fk in self.config.extra_fks:
             src_schema, src_table_name = parse_table_name(extra_fk.src_table)
             dst_schema, dst_table_name = parse_table_name(extra_fk.dst_table)
-            self.meta.add_foreign_key(
-                src_schema,
-                src_table_name,
+            table = self.meta.tables.get((src_schema, src_table_name))
+            if table is None:
+                LOGGER.warning(
+                    "Found no source table %s.%s referenced in add_extra_fks",
+                    src_schema,
+                    src_table_name,
+                )
+                continue
+            if (dst_schema, dst_table_name) not in self.meta.tables:
+                LOGGER.warning(
+                    "Found no destination table %s.%s referenced in add_extra_fks",
+                    dst_schema,
+                    dst_table_name,
+                )
+                continue
+
+            table.foreign_keys.append(
                 ForeignKey(
                     columns=tuple(extra_fk.src_columns),
                     dst_schema=dst_schema,
@@ -176,7 +193,15 @@ class Planner:
         for ignore_fk in self.config.ignore_fks:
             src_schema, src_table_name = parse_table_name(ignore_fk.src_table)
             dst_schema, dst_table_name = parse_table_name(ignore_fk.dst_table)
-            table = self.meta.tables[(src_schema, src_table_name)]
+            table = self.meta.tables.get((src_schema, src_table_name))
+            if table is None:
+                LOGGER.warning(
+                    "Found no table %s.%s referenced in ignore_fks",
+                    src_schema,
+                    src_table_name,
+                )
+                continue
+
             table.foreign_keys = [
                 fk
                 for fk in table.foreign_keys
@@ -201,17 +226,28 @@ class Planner:
         """
         Make sure no passthrough table has an FK to a non-passthrough table.
         """
-        for schema, table in self.passthrough_tables:
+        not_found_tables = set()
+        for schema, table_name in self.passthrough_tables:
+            table = self.meta.tables.get((schema, table_name))
+            if table is None:
+                not_found_tables.add((schema, table_name))
+                LOGGER.warning(
+                    "Could not find passthrough table %s.%s", schema, table_name
+                )
+                continue
+
             # Ensure that passthrough tables have no foreign keys to tables outside of this set.
-            for foreign_key in self.meta.tables[(schema, table)].foreign_keys:
+            for foreign_key in table.foreign_keys:
                 if (
                     foreign_key.dst_schema,
                     foreign_key.dst_table,
                 ) not in self.passthrough_tables:
                     raise ValueError(
-                        f"Passthrough table {schema!r}.{table!r} has foreign key to non passthrough "
+                        f"Passthrough table {schema!r}.{table_name!r} has foreign key to non passthrough "
                         f"table {foreign_key.dst_schema!r}.{foreign_key.dst_table!r}"
                     )
+
+        self.passthrough_tables -= not_found_tables
 
     def _plan_table(
         self,
@@ -272,7 +308,9 @@ class Planner:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
 
     with open("planner_config.yaml", "r", encoding="utf-8") as fconfig:
         config = PlannerConfig.parse_obj(yaml.safe_load(fconfig))
