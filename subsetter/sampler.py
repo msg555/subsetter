@@ -109,6 +109,11 @@ class MysqlOutput(SamplerOutput):
             tables,
             close_backward=True,
         )
+        for table in tables:
+            if parse_table_name(table) not in meta.tables:
+                LOGGER.warning(
+                    "Database does not have table %s, will not sample", table
+                )
         for schema, table_name in additional_tables:
             LOGGER.info(
                 "Found additional unsampled table %s.%s to truncate",
