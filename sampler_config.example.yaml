@@ -1,0 +1,21 @@
+# Optionally specify the source database. This can also be passed on the command
+# line or through environment variables. 
+source:
+  host: my-database # overridden by SUBSET_SOURCE_HOST
+  port: 3306 # overridden by SUBSET_SOURCE_PORT
+  username: my_user # overridden by SUBSET_SOURCE_USERNAME
+  password: my_s3cret # overridden by SUBSET_SOURCE_PASSWORD
+
+# Optionally specify the source database. This can also be passed on the command
+# line or through environment variables. 
+output:
+  mode: mysql
+  host: my-dest-database # overridden by SUBSET_DESTINATION_HOST
+  port: 3306 # overridden by SUBSET_DESTINATION_PORT
+  username: my_dest_user # overridden by SUBSET_DESTINATION_USERNAME
+  password: my_dest_s3cret  # overridden by SUBSET_DESTINATION_PASSWORD
+
+# Alternative configuration to output JSON files within a directory
+output:
+  mode: directory
+  directory: some/output/dir/

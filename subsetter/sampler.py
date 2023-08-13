@@ -5,7 +5,6 @@ import os
 from typing import Annotated, Any, List, Literal, Union
 
 import sqlalchemy as sa
-import yaml
 from pydantic import BaseModel, Field
 
 from subsetter.common import (
@@ -57,7 +56,8 @@ class SamplerOutput(abc.ABC):
     def truncate(self, schema: str, table_name: str) -> None:
         pass
 
-    def insert_order(self, tables: List[str]) -> List[str]:
+    def insert_order(self, tables: List[str], *, truncate: bool = False) -> List[str]:
+        # pylint: disable=unused-argument
         return tables
 
     @staticmethod
@@ -103,11 +103,11 @@ class MysqlOutput(SamplerOutput):
             )
             conn.commit()
 
-    def insert_order(self, tables: List[str]) -> List[str]:
+    def insert_order(self, tables: List[str], *, truncate: bool = True) -> List[str]:
         meta, additional_tables = DatabaseMetadata.from_engine(
             self.engine,
             tables,
-            close_backward=True,
+            close_backward=truncate,
         )
         for table in tables:
             if parse_table_name(table) not in meta.tables:
@@ -167,10 +167,11 @@ class Sampler:
         )
         self.output = SamplerOutput.from_config(config.output)
 
-    def sample(self, plan: SubsetPlan) -> None:
-        insert_order = self.output.insert_order(list(plan.queries))
+    def sample(self, plan: SubsetPlan, *, truncate: bool = False) -> None:
+        insert_order = self.output.insert_order(list(plan.queries), truncate=truncate)
 
-        self._truncate(insert_order)
+        if truncate:
+            self._truncate(insert_order)
         with self.source_engine.connect() as conn:
             self._materialize_tables(conn, plan)
             self._copy_results(conn, plan, insert_order)
@@ -247,20 +248,3 @@ class Sampler:
                 _count_rows(result),
             )
             LOGGER.info("Sampled %d rows for %s.%s", rows, schema, table_name)
-
-
-def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-    )
-
-    with open("sampler_config.yaml", "r", encoding="utf-8") as fconfig:
-        config = SamplerConfig.parse_obj(yaml.safe_load(fconfig))
-    with open("plan.yaml", "r", encoding="utf-8") as fplan:
-        plan = SubsetPlan.parse_obj(yaml.safe_load(fplan))
-
-    Sampler(config).sample(plan)
-
-
-if __name__ == "__main__":
-    main()

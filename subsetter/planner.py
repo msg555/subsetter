@@ -1,9 +1,7 @@
 import logging
-import sys
 from typing import Dict, List, Literal, Optional, Set, Tuple, Union
 
 import sqlalchemy as sa
-import yaml
 from pydantic import BaseModel
 
 from subsetter.common import (
@@ -305,24 +303,3 @@ class Planner:
             params=params,
             materialize=materialize,
         )
-
-
-def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-    )
-
-    with open("planner_config.yaml", "r", encoding="utf-8") as fconfig:
-        config = PlannerConfig.parse_obj(yaml.safe_load(fconfig))
-
-    yaml.dump(
-        Planner(config).plan().dict(exclude_defaults=True),
-        stream=sys.stdout,
-        default_flow_style=False,
-        width=2**20,
-        sort_keys=False,
-    )
-
-
-if __name__ == "__main__":
-    main()

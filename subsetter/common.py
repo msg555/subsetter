@@ -28,6 +28,7 @@ def parse_table_name(full_table_name: str) -> Tuple[str, str]:
 def database_url(
     *,
     env_prefix: Optional[str] = None,
+    drivername="mysql+pymysql",
     host: Optional[str] = None,
     port: Optional[int] = None,
     username: Optional[str] = None,
@@ -39,7 +40,7 @@ def database_url(
         username = username or os.environ[f"{env_prefix}USERNAME"]
         password = password or os.environ[f"{env_prefix}PASSWORD"]
     return sa.engine.URL.create(
-        drivername="mysql+pymysql",
+        drivername=drivername,
         host=host,
         port=port or 3306,
         username=username,
