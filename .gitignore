@@ -1,2 +1,6 @@
 *.pyc
 *.swp
+.venv
+dist
+*.egg-info
+*.pypi-token.gpg
