@@ -13,6 +13,11 @@ targets:
   # Sample 100 users randomly from db1.users
   db1.users:
     amount: 100
+    # Additional possible filters
+    # in:
+    #   user_id: [123, 456, 789]
+    # like:
+    #   email: '%@somewhere.com'
 
   # Sample 10% of rows in db2.gadgets
   db2.gadgets:

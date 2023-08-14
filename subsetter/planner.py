@@ -2,7 +2,7 @@ import logging
 from typing import Dict, List, Literal, Optional, Set, Tuple, Union
 
 import sqlalchemy as sa
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from subsetter.common import (
     DatabaseConfig,
@@ -22,11 +22,13 @@ class PlannerConfig(BaseModel):
     class TargetConfig(BaseModel):
         percent: Optional[float] = None
         amount: Optional[int] = None
+        like: Dict[str, List[str]] = {}
+        in_: Dict[str, List[Union[int, str]]] = Field({}, alias="in")
 
     class ColumnConstraint(BaseModel):
         column: str
         operator: Literal["<", ">", "=", "<>", "!=", "in", "not in"]
-        expression: Union[float, str, List[Union[float, str]]]
+        expression: Union[int, float, str, List[Union[int, float, str]]]
 
     class IgnoreFKConfig(BaseModel):
         src_table: str
@@ -54,7 +56,7 @@ class PlannerConfig(BaseModel):
 class SubsetPlan(BaseModel):
     class SubsetQuery(BaseModel):
         query: str
-        params: Dict[str, Union[float, str, List[Union[float, str]]]] = {}
+        params: Dict[str, Union[int, float, str, List[Union[int, float, str]]]] = {}
         materialize: bool = False
 
     queries: Dict[str, SubsetQuery]
@@ -269,7 +271,7 @@ class Planner:
                 f"FROM {mysql_table_name(fk.dst_schema, fk.dst_table + '<SAMPLED>')})"
             )
 
-        params: Dict[str, Union[float, str, List[Union[float, str]]]] = {}
+        params: Dict[str, Union[int, float, str, List[Union[int, float, str]]]] = {}
         and_constraints = []
 
         conf_constraints = (
@@ -289,6 +291,20 @@ class Planner:
                 or_constraints.append(f"rand() < {target.percent / 100.0}")
             elif target.amount is not None:
                 final_clause = f" ORDER BY rand() LIMIT {target.amount}"
+            else:
+                for column, patterns in target.like.items():
+                    for pattern in patterns:
+                        param_name = f"param_{len(params)}"
+                        or_constraints.append(
+                            f"{mysql_identifier(column)} LIKE :{param_name}"
+                        )
+                        params[param_name] = pattern
+                for column, in_list in target.in_.items():
+                    param_name = f"param_{len(params)}"
+                    or_constraints.append(
+                        f"{mysql_identifier(column)} IN :{param_name}"
+                    )
+                    params[param_name] = list(in_list)
 
         query = f"SELECT * FROM {mysql_table_name(table.schema, table.name)}"
         if or_constraints and and_constraints:
