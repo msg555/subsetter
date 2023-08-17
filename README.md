@@ -49,6 +49,11 @@ export SUBSET_DESTINATION_PASSWORD=my-db-password
 python -m subsetter sample --plan my-plan.yaml mysql --host my-db-host --user my-db-user
 ```
 
+The sampler also supports filters which allow you to transform and anonymize your
+data using simple column filters. See
+[sampler_config.sample.yaml](sampler_config.sample.yaml) for more details on what
+filters are available and how to configure them.
+
 ## Plan and sample in one action
 
 There's also a `subset` subcommand to perform the `plan` and `sample` actions
@@ -67,7 +72,3 @@ This project is still relatively incomplete and lacks some basic things like:
 
 - More complete documentation
 - Testing
-
-Additionally the following ideas are potential future work for features:
-
-- Data anonymization, ideally without ever commiting unanonymized data to destination

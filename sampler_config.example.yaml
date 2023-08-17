@@ -16,6 +16,82 @@ output:
   password: my_dest_s3cret  # overridden by SUBSET_DESTINATION_PASSWORD
 
 # Alternative configuration to output JSON files within a directory
-output:
-  mode: directory
-  directory: some/output/dir/
+# output:
+#   mode: directory
+#   directory: some/output/dir/
+
+# Filters allow you to anonymize and shape your output dataset.
+filters:
+
+  # A list of filters can be given for each table. Filters are applied in order
+  # with the results of the last filter being part of the output.
+  db1.users:
+
+  # The 'null' secret will replace the sampled value with null for the given
+  # columns. The 'zero' filter works the same way but instead replaces the value
+  # with a 'zero' value of the same type (e.g. empty string or 0)
+  - op: "null"
+    columns: [big_secret]
+
+  # The 'omit' filter will remove the given column from the output set. This can
+  # be useful if that column doesn't exist in your output or it cannot be set
+  # directly.
+  - op: omit
+    columns: [extra_column]
+
+  # The 'constant' filter can be used to replace a column's value with a
+  # constant value instead.
+  - op: constant
+    columns: [is_active, role]
+    values: [1, admin]
+
+  # The 'random_int' and 'random_float' filters can replace a value with a
+  # random int or float in the desired range (inclusive).
+  - op: random_int
+    columns: [test_score]
+    low: 0
+    high: 100
+
+  # The 'random_string' filter can replace column values with random textual
+  # data in a variety of forms.
+  - op: random_string
+
+    # Here we generate a hex string of length 16. Other 'alphabets' include
+    # "alnum", "hex_lower", "hex_upper", "digit", "alpha", "alpha_lower",
+    # "alpha_upper".
+    alphabet: hex
+    length: 16
+
+  # The 'random_uuid' replaces the given column with a random uuid.
+  - op: random_uuid
+    columns: [gizmo_uuid]
+
+  # The remaining filters are wrappers around the corresponding Faker generator
+  # (see https://faker.readthedocs.io/en/master/). The full list of supported
+  # filters is:
+  # - fake_email
+  # - fake_first_name
+  # - fake_last_name
+  # - fake_name
+  # - fake_phone_number
+  # - fake_license_plate
+  # - fake_vin
+  # - fake_address
+  # - fake_building_number
+  # - fake_city
+  # - fake_state
+  # - fake_state_abbr
+  # - fake_country
+  # - fake_country_code
+  # - fake_postal_code
+  # - fake_street_address
+  # - fake_street_name
+  # - fake_latitude
+  # - fake_longitude
+  #
+  # If the optional property 'unique' is set Faker will use the 'unique'
+  # interface. Note that this can lead to failures if generating a lot of data
+  # or setting on filters with limited output space (e.g. "fake_state")
+  - op: fake_email
+    columns: [email_address]
+    unique: true # optional, if set uses the 'unique' faker interface

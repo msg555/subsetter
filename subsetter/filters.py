@@ -3,6 +3,7 @@ import string
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from random import Random
+from uuid import uuid4
 from typing import (
     Annotated,
     Any,
@@ -319,6 +320,18 @@ class FilterConstant(FilterColumns):
         return self.values
 
 
+class FilterUuid(FilterColumns):
+    class Config(SingleFilterConfig):
+        op: Literal["uuid"]
+        columns: List[str]
+
+        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
+            return FilterUuid(columns_in, self.columns)
+
+    def filter_values(self, values: List[Any]) -> Iterable[Any]:
+        return (str(uuid4()) for _ in values)
+
+
 class FilterFakeColumns(FilterColumns):
     def __init__(
         self,
@@ -383,6 +396,7 @@ SimpleFilterConfig: Type[SingleFilterConfig] = Annotated[  # type: ignore
         FilterRandomInt.Config,
         FilterRandomFloat.Config,
         FilterRandomString.Config,
+        FilterUuid.Config,
         *FAKER_CONFIG_CLASSES,
     ],
     Field(..., discriminator="op"),
