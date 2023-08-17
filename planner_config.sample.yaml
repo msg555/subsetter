@@ -17,7 +17,7 @@ targets:
     # in:
     #   user_id: [123, 456, 789]
     # like:
-    #   email: '%@somewhere.com'
+    #   email: ['%@somewhere.com']
 
   # Sample 10% of rows in db2.gadgets
   db2.gadgets:

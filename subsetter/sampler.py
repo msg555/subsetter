@@ -2,7 +2,7 @@ import abc
 import json
 import logging
 import os
-from typing import Annotated, Any, List, Literal, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
@@ -14,6 +14,7 @@ from subsetter.common import (
     mysql_table_name,
     parse_table_name,
 )
+from subsetter.filters import FilterConfig, FilterView, FilterViewChain
 from subsetter.metadata import DatabaseMetadata
 from subsetter.planner import SubsetPlan
 
@@ -45,11 +46,21 @@ OutputType = Annotated[
 class SamplerConfig(BaseModel):
     source: DatabaseConfig = DatabaseConfig()
     output: OutputType = DirectoryOutputConfig(mode="directory", directory="output")
+    filters: Dict[str, List[FilterConfig]] = {}  # type: ignore
+
+
+SamplerConfig.update_forward_refs()
 
 
 class SamplerOutput(abc.ABC):
     def output_result_set(
-        self, schema: str, table_name: str, columns: List[str], result_set
+        self,
+        schema: str,
+        table_name: str,
+        columns: List[str],
+        result_set,
+        *,
+        filter_view: Optional[FilterView] = None,
     ) -> None:
         pass
 
@@ -74,12 +85,20 @@ class DirectoryOutput(SamplerOutput):
         self.directory = config.directory
 
     def output_result_set(
-        self, schema: str, table_name: str, columns: List[str], result_set
+        self,
+        schema: str,
+        table_name: str,
+        columns: List[str],
+        result_set,
+        *,
+        filter_view: Optional[FilterView] = None,
     ) -> None:
         output_path = os.path.join(self.directory, f"{schema}.{table_name}.json")
+        columns_out = filter_view.columns_out if filter_view else columns
         with open(output_path, "w", encoding="utf-8") as fdump:
             for row in result_set:
-                json.dump(dict(zip(columns, row)), fdump, default=str)
+                row = filter_view.filter_view(row) if filter_view else row
+                json.dump(dict(zip(columns_out, row)), fdump, default=str)
                 fdump.write("\n")
 
 
@@ -123,11 +142,18 @@ class MysqlOutput(SamplerOutput):
         return [str(table) for table in meta.toposort()]
 
     def output_result_set(
-        self, schema: str, table_name: str, columns: List[str], result_set
+        self,
+        schema: str,
+        table_name: str,
+        columns: List[str],
+        result_set,
+        *,
+        filter_view: Optional[FilterView] = None,
     ) -> None:
+        columns_out = filter_view.columns_out if filter_view else columns
         insert_query = (
             f"INSERT INTO {mysql_table_name(schema, table_name)} "
-            f"({mysql_column_list(columns)}) VALUES "
+            f"({mysql_column_list(columns_out)}) VALUES "
         )
         with self.engine.connect() as conn:
             flush_count = 1024
@@ -144,6 +170,7 @@ class MysqlOutput(SamplerOutput):
                 buffer.clear()
 
             for row in result_set:
+                row = filter_view.filter_view(row) if filter_view else row
                 buffer.append(tuple(row))
                 if len(buffer) > flush_count:
                     _flush_buffer()
@@ -168,6 +195,9 @@ class Sampler:
         self.output = SamplerOutput.from_config(config.output)
 
     def sample(self, plan: SubsetPlan, *, truncate: bool = False) -> None:
+        meta, _ = DatabaseMetadata.from_engine(self.source_engine, list(plan.queries))
+        self._validate_filters(meta)
+
         insert_order = self.output.insert_order(list(plan.queries), truncate=truncate)
 
         if truncate:
@@ -233,6 +263,11 @@ class Sampler:
                 )
             columns = result.keys()
 
+            filter_view = FilterViewChain.construct_filter(
+                columns,
+                self.config.filters.get(table, []),
+            )
+
             rows = 0
 
             def _count_rows(result):
@@ -246,5 +281,19 @@ class Sampler:
                 table_name,
                 columns,
                 _count_rows(result),
+                filter_view=filter_view,
             )
             LOGGER.info("Sampled %d rows for %s.%s", rows, schema, table_name)
+
+    def _validate_filters(self, meta: DatabaseMetadata):
+        for table, filters in self.config.filters.items():
+            if not filters:
+                continue
+
+            schema, table_name = parse_table_name(table)
+            tbl = meta.tables.get((schema, table_name))
+            if tbl is None:
+                LOGGER.warning("Found filters for unknown table %s", table)
+                continue
+
+            FilterViewChain.construct_filter(tbl.columns, filters)
