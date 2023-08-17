@@ -3,9 +3,7 @@ import string
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from random import Random
-from uuid import uuid4
 from typing import (
-    Annotated,
     Any,
     Callable,
     Dict,
@@ -17,9 +15,11 @@ from typing import (
     Type,
     Union,
 )
+from uuid import uuid4
 
 from faker import Faker
 from pydantic import BaseModel, Field
+from pydantic.typing import Annotated
 
 
 class FilterView(abc.ABC):
@@ -362,29 +362,58 @@ def _simple_faker_class(op_name: str, faker_op: Callable[[Faker], Any]):
         def filter_values(self, values: List[Any]) -> Iterable[Any]:
             return (faker_op(self.faker) for _ in values)
 
+    name = "".join(part.title() for part in op_name.split("_"))
+    FilterFakeOper.__name__ = f"Filter{name}"
+    FilterFakeOper.__qualname__ = f"Filter{name}"
+    FilterFakeOper.Config.__name__ = f"Filter{name}.Config"
+    FilterFakeOper.Config.__qualname__ = f"Filter{name}.Config"
     FAKER_CONFIG_CLASSES.append(FilterFakeOper.Config)
     return FilterFakeOper
 
 
-_simple_faker_class("fake_email", lambda faker: faker.email())
-_simple_faker_class("fake_first_name", lambda faker: faker.first_name())
-_simple_faker_class("fake_last_name", lambda faker: faker.last_name())
-_simple_faker_class("fake_name", lambda faker: faker.name())
-_simple_faker_class("fake_phone_number", lambda faker: faker.phone_number())
-_simple_faker_class("fake_license_plate", lambda faker: faker.licence_plate())
-_simple_faker_class("fake_vin", lambda faker: faker.vin())
-_simple_faker_class("fake_address", lambda faker: faker.address())
-_simple_faker_class("fake_building_number", lambda faker: faker.building_number())
-_simple_faker_class("fake_city", lambda faker: faker.city())
-_simple_faker_class("fake_state", lambda faker: faker.state())
-_simple_faker_class("fake_state_abbr", lambda faker: faker.state_abbr())
-_simple_faker_class("fake_country", lambda faker: faker.country())
-_simple_faker_class("fake_country_code", lambda faker: faker.country_code())
-_simple_faker_class("fake_postal_code", lambda faker: faker.postcode())
-_simple_faker_class("fake_street_address", lambda faker: faker.street_address())
-_simple_faker_class("fake_street_name", lambda faker: faker.street_name())
-_simple_faker_class("fake_latitude", lambda faker: faker.latitude())
-_simple_faker_class("fake_longitude", lambda faker: faker.longitude())
+FilterFakeEmail = _simple_faker_class("fake_email", lambda faker: faker.email())
+FilterFakeFirstName = _simple_faker_class(
+    "fake_first_name", lambda faker: faker.first_name()
+)
+FilterFakeLastName = _simple_faker_class(
+    "fake_last_name", lambda faker: faker.last_name()
+)
+FilterFakeName = _simple_faker_class("fake_name", lambda faker: faker.name())
+FilterFakePhoneNumber = _simple_faker_class(
+    "fake_phone_number", lambda faker: faker.phone_number()
+)
+FilterFakeLicensePlate = _simple_faker_class(
+    "fake_license_plate", lambda faker: faker.licence_plate()
+)
+FilterFakeVin = _simple_faker_class("fake_vin", lambda faker: faker.vin())
+FilterFakeAddress = _simple_faker_class("fake_address", lambda faker: faker.address())
+FilterFakeBuildingNumber = _simple_faker_class(
+    "fake_building_number", lambda faker: faker.building_number()
+)
+FilterFakeCity = _simple_faker_class("fake_city", lambda faker: faker.city())
+FilterFakeState = _simple_faker_class("fake_state", lambda faker: faker.state())
+FilterFakeStateAbbr = _simple_faker_class(
+    "fake_state_abbr", lambda faker: faker.state_abbr()
+)
+FilterFakeCountry = _simple_faker_class("fake_country", lambda faker: faker.country())
+FilterFakeCountryCode = _simple_faker_class(
+    "fake_country_code", lambda faker: faker.country_code()
+)
+FilterFakePostalCode = _simple_faker_class(
+    "fake_postal_code", lambda faker: faker.postcode()
+)
+FilterFakeStreetAddress = _simple_faker_class(
+    "fake_street_address", lambda faker: faker.street_address()
+)
+FilterFakeStreetName = _simple_faker_class(
+    "fake_street_name", lambda faker: faker.street_name()
+)
+FilterFakeLatitude = _simple_faker_class(
+    "fake_latitude", lambda faker: faker.latitude()
+)
+FilterFakeLongitude = _simple_faker_class(
+    "fake_longitude", lambda faker: faker.longitude()
+)
 
 
 SimpleFilterConfig: Type[SingleFilterConfig] = Annotated[  # type: ignore
@@ -397,7 +426,25 @@ SimpleFilterConfig: Type[SingleFilterConfig] = Annotated[  # type: ignore
         FilterRandomFloat.Config,
         FilterRandomString.Config,
         FilterUuid.Config,
-        *FAKER_CONFIG_CLASSES,
+        FilterFakeEmail.Config,
+        FilterFakeFirstName.Config,
+        FilterFakeLastName.Config,
+        FilterFakeName.Config,
+        FilterFakePhoneNumber.Config,
+        FilterFakeLicensePlate.Config,
+        FilterFakeVin.Config,
+        FilterFakeAddress.Config,
+        FilterFakeBuildingNumber.Config,
+        FilterFakeCity.Config,
+        FilterFakeState.Config,
+        FilterFakeStateAbbr.Config,
+        FilterFakeCountry.Config,
+        FilterFakeCountryCode.Config,
+        FilterFakePostalCode.Config,
+        FilterFakeStreetAddress.Config,
+        FilterFakeStreetName.Config,
+        FilterFakeLatitude.Config,
+        FilterFakeLongitude.Config,
     ],
     Field(..., discriminator="op"),
 ]

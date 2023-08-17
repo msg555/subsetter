@@ -2,10 +2,11 @@ import abc
 import json
 import logging
 import os
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
+from pydantic.typing import Annotated
 
 from subsetter.common import (
     DatabaseConfig,
