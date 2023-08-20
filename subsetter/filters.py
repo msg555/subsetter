@@ -1,6 +1,7 @@
 import abc
+import dataclasses
 import string
-from datetime import datetime, timezone
+from datetime import datetime
 from fnmatch import fnmatch
 from random import Random
 from typing import (
@@ -20,6 +21,14 @@ from uuid import uuid4
 from faker import Faker
 from pydantic import BaseModel, Field
 from pydantic.typing import Annotated
+
+EPOCH = datetime(1970, 1, 1, 0, 0)
+
+
+@dataclasses.dataclass(frozen=True)
+class FilterContext:
+    random: Optional[Random] = None
+    faker: Optional[Faker] = None
 
 
 class FilterView(abc.ABC):
@@ -100,13 +109,17 @@ class FilterViewChain(FilterView):
 
     @classmethod
     def construct_filter(
-        cls, columns_in: Iterable[str], filter_configs: Iterable["FilterConfig"]  # type: ignore
+        cls,
+        columns_in: Iterable[str],
+        filter_configs: Iterable["FilterConfig"],  # type: ignore
+        *,
+        filter_context=FilterContext(),
     ) -> "FilterViewChain":
         cols_in = tuple(columns_in)
         cols_out = cols_in
         filter_views = []
         for filter_config in filter_configs:
-            filter_view = filter_config.construct_filter(cols_out)  # type: ignore
+            filter_view = filter_config.construct_filter(cols_out, filter_context=filter_context)  # type: ignore
             cols_out = filter_view.columns_out
             filter_views.append(filter_view)
         return cls(cols_in, cols_out, filter_views)
@@ -114,7 +127,9 @@ class FilterViewChain(FilterView):
 
 class SingleFilterConfig(BaseModel, abc.ABC):
     @abc.abstractmethod
-    def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
+    def construct_filter(
+        self, columns_in: Iterable[str], *, filter_context=FilterContext()
+    ) -> FilterView:
         pass
 
 
@@ -123,7 +138,9 @@ class FilterZero(FilterColumns):
         op: Literal["zero"]
         columns: List[str]
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
             return FilterZero(columns_in, self.columns)
 
     def filter_values(self, values: List[Any]) -> Iterable[Any]:
@@ -137,9 +154,7 @@ class FilterZero(FilterColumns):
             elif isinstance(value, float):
                 yield 0.0
             elif isinstance(value, datetime):
-                yield datetime.fromtimestamp(
-                    0, tz=timezone.utc if value.tzinfo else None
-                )
+                yield EPOCH.replace(tzinfo=value.tzinfo)
             else:
                 raise ValueError(f"Cannot zero unknown type {str(type(value))}")
 
@@ -149,7 +164,9 @@ class FilterOmit(FilterView):
         op: Literal["omit"]
         columns: List[str]
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
             return FilterOmit(columns_in, self.columns)
 
     def __init__(self, columns_in: Iterable[str], columns_act: Iterable[str]) -> None:
@@ -173,7 +190,9 @@ class FilterNull(FilterColumns):
         op: Literal["null"]
         columns: List[str]
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
             return FilterNull(columns_in, self.columns)
 
     def filter_values(self, values: List[Any]) -> Iterable[Any]:
@@ -187,8 +206,12 @@ class FilterRandomInt(FilterColumns):
         low: int
         high: int
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
-            return FilterRandomInt(columns_in, self.columns, self.low, self.high)
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
+            return FilterRandomInt(
+                columns_in, self.columns, self.low, self.high, rng=filter_context.random
+            )
 
     def __init__(
         self,
@@ -215,8 +238,12 @@ class FilterRandomFloat(FilterColumns):
         low: float
         high: float
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
-            return FilterRandomFloat(columns_in, self.columns, self.low, self.high)
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
+            return FilterRandomFloat(
+                columns_in, self.columns, self.low, self.high, rng=filter_context.random
+            )
 
     def __init__(
         self,
@@ -238,9 +265,9 @@ class FilterRandomFloat(FilterColumns):
 
 _ALPHABET_MAP = {
     "alnum": string.ascii_letters + string.digits,
-    "hex": string.hexdigits,
-    "hex_lower": string.hexdigits.lower(),
-    "hex_upper": string.hexdigits.upper(),
+    "hex": string.digits + "abcdef",
+    "hex_lower": string.digits + "abcdef",
+    "hex_upper": string.digits + "ABCDEF",
     "digit": string.digits,
     "alpha": string.ascii_letters,
     "alpha_lower": string.ascii_lowercase,
@@ -267,11 +294,19 @@ class FilterRandomString(FilterColumns):
         alphabet: _ALPHABET_TYPES = "alnum"
         custom_alphabet: Optional[str] = None
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
             alphabet = _ALPHABET_MAP.get(self.alphabet, self.custom_alphabet)
             if not alphabet:
                 raise ValueError("Custom alphabet cannot be empty")
-            return FilterRandomString(columns_in, self.columns, self.length, alphabet)
+            return FilterRandomString(
+                columns_in,
+                self.columns,
+                self.length,
+                alphabet,
+                rng=filter_context.random,
+            )
 
     def __init__(
         self,
@@ -291,7 +326,7 @@ class FilterRandomString(FilterColumns):
         return ("".join(self.rng.choices(self.alphabet, k=self.length)) for _ in values)
 
 
-FilterConstantTypes = Union[None, int, float, str]
+FilterConstantTypes = Union[None, float, int, str]
 
 
 class FilterConstant(FilterColumns):
@@ -300,7 +335,14 @@ class FilterConstant(FilterColumns):
         columns: List[str]
         values: List[FilterConstantTypes]
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
+        class Config:
+            """Sometimes your configs have configs and that's okay"""
+
+            smart_union = True
+
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
             return FilterConstant(columns_in, self.columns, self.values)
 
     def __init__(
@@ -325,7 +367,9 @@ class FilterUuid(FilterColumns):
         op: Literal["uuid"]
         columns: List[str]
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
             return FilterUuid(columns_in, self.columns)
 
     def filter_values(self, values: List[Any]) -> Iterable[Any]:
@@ -356,8 +400,15 @@ def _simple_faker_class(op_name: str, faker_op: Callable[[Faker], Any]):
             columns: List[str]
             unique: bool = False
 
-            def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
-                return FilterFakeOper(columns_in, self.columns, unique=self.unique)
+            def construct_filter(
+                self, columns_in: Iterable[str], *, filter_context=FilterContext()
+            ) -> FilterView:
+                return FilterFakeOper(
+                    columns_in,
+                    self.columns,
+                    unique=self.unique,
+                    faker=filter_context.faker,
+                )
 
         def filter_values(self, values: List[Any]) -> Iterable[Any]:
             return (faker_op(self.faker) for _ in values)
@@ -490,8 +541,16 @@ class FilterMultiplex(FilterView):
         column: str
         conditions: List[MultiplexCondition]
 
-        def construct_filter(self, columns_in: Iterable[str]) -> FilterView:
-            return FilterMultiplex(columns_in, self.op, self.column, self.conditions)
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
+            return FilterMultiplex(
+                columns_in,
+                self.op,
+                self.column,
+                self.conditions,
+                filter_context=filter_context,
+            )
 
     def __init__(
         self,
@@ -499,6 +558,8 @@ class FilterMultiplex(FilterView):
         op: str,
         column: str,
         conditions: Iterable[MultiplexCondition],
+        *,
+        filter_context=FilterContext(),
     ) -> None:
         super().__init__(columns_in)
         self.op = op
@@ -509,7 +570,7 @@ class FilterMultiplex(FilterView):
             raise ValueError("Multiplex column does not exist") from exc
         self.conditions = tuple(conditions)
         self.condition_filters = tuple(
-            condition.apply.construct_filter(columns_in)  # type: ignore
+            condition.apply.construct_filter(columns_in, filter_context=filter_context)  # type: ignore
             for condition in self.conditions
         )
         for condition_filter in self.condition_filters:

@@ -2,24 +2,28 @@ PYTHON ?= python3
 
 .PHONY: format
 format:
-	$(PYTHON) -m black subsetter
-	$(PYTHON) -m isort subsetter
+	$(PYTHON) -m black subsetter tests
+	$(PYTHON) -m isort subsetter tests
 
 .PHONY: format-check
 format-check:
-	$(PYTHON) -m black subsetter --check
-	$(PYTHON) -m isort subsetter --check
+	$(PYTHON) -m black subsetter tests --check
+	$(PYTHON) -m isort subsetter tests --check
 
 .PHONY: mypy
 mypy:
-	$(PYTHON) -m mypy subsetter
+	$(PYTHON) -m mypy subsetter tests
 
 .PHONY: pylint
 pylint:
-	$(PYTHON) -m pylint subsetter
+	$(PYTHON) -m pylint subsetter tests
 
 .PHONY: lint
 lint: format-check mypy pylint
+
+.PHONY: test
+test:
+	$(PYTHON) -m pytest -sv tests/
 
 .PHONY: build
 build:
