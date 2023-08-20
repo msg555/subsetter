@@ -71,4 +71,4 @@ python -m subsetter subset --plan-config my-config.yaml mysql --host my-db-host 
 This project is still relatively incomplete and lacks some basic things like:
 
 - More complete documentation
-- Testing
+- More testing
