@@ -38,7 +38,7 @@ def database_url(
         host = host or os.getenv(f"{env_prefix}HOST", "localhost")
         port = port or int(os.getenv(f"{env_prefix}PORT", "3306"))
         username = username or os.environ[f"{env_prefix}USERNAME"]
-        password = password or os.environ[f"{env_prefix}PASSWORD"]
+        password = os.environ[f"{env_prefix}PASSWORD"] if password is None else password
     return sa.engine.URL.create(
         drivername=drivername,
         host=host,
@@ -54,3 +54,17 @@ class DatabaseConfig(BaseModel):
     port: Optional[int] = None
     username: Optional[str] = None
     password: Optional[str] = None
+
+    def database_url(
+        self,
+        env_prefix: Optional[str] = None,
+        drivername="mysql+pymysql",
+    ) -> sa.engine.URL:
+        return database_url(
+            env_prefix=env_prefix,
+            drivername=drivername,
+            host=self.host,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+        )

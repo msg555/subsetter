@@ -66,3 +66,9 @@ extra_fks:
   src_columns: [user_id]
   dst_table: db1.users
   dst_columns: [id]
+
+# If set to true subsetter will automatically attempt to infer foreign keys
+# within a single database. It does this by inferring that a column name that
+# matches the name of a primary key column (that is unique within the database)
+# should function as a foreign key to that table.
+infer_foreign_keys: false

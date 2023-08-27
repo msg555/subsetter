@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from subsetter.common import (
     DatabaseConfig,
-    database_url,
     mysql_column_list,
     mysql_identifier,
     mysql_table_name,
@@ -51,6 +50,7 @@ class PlannerConfig(BaseModel):
     passthrough: List[str] = []
     ignore_fks: List[IgnoreFKConfig] = []
     extra_fks: List[ExtraFKConfig] = []
+    infer_foreign_keys: bool = False
 
 
 class SubsetPlan(BaseModel):
@@ -66,12 +66,8 @@ class Planner:
     def __init__(self, config: PlannerConfig) -> None:
         self.config = config
         self.engine = sa.create_engine(
-            database_url(
+            self.config.source.database_url(
                 env_prefix="SUBSET_SOURCE_",
-                host=self.config.source.host,
-                port=self.config.source.port,
-                username=self.config.source.username,
-                password=self.config.source.password,
             )
         )
         self.meta: DatabaseMetadata
@@ -100,7 +96,8 @@ class Planner:
                 extra_table[1],
             )
 
-        self.meta.infer_missing_foreign_keys()
+        if self.config.infer_foreign_keys:
+            self.meta.infer_missing_foreign_keys()
         self._remove_ignore_fks()
         self._add_extra_fks()
 

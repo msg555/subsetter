@@ -55,3 +55,8 @@ load-plugins = [
 extension-pkg-allow-list = [
     "pydantic",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "mysql_live",
+]

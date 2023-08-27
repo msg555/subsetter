@@ -10,7 +10,6 @@ from pydantic.typing import Annotated
 
 from subsetter.common import (
     DatabaseConfig,
-    database_url,
     mysql_column_list,
     mysql_table_name,
     parse_table_name,
@@ -106,12 +105,8 @@ class DirectoryOutput(SamplerOutput):
 class MysqlOutput(SamplerOutput):
     def __init__(self, config: MysqlOutputConfig) -> None:
         self.engine = sa.create_engine(
-            database_url(
+            config.database_url(
                 env_prefix="SUBSET_DESTINATION_",
-                host=config.host,
-                port=config.port,
-                username=config.username,
-                password=config.password,
             )
         )
 
@@ -185,12 +180,8 @@ class Sampler:
     def __init__(self, config: SamplerConfig) -> None:
         self.config = config
         self.source_engine = sa.create_engine(
-            database_url(
+            self.config.source.database_url(
                 env_prefix="SUBSET_SOURCE_",
-                host=self.config.source.host,
-                port=self.config.source.port,
-                username=self.config.source.username,
-                password=self.config.source.password,
             )
         )
         self.output = SamplerOutput.from_config(config.output)

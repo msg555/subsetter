@@ -7,3 +7,4 @@ types-PyYAML
 pylint_pydantic
 
 pytest ~= 7.4
+pytest-mysql ~= 2.4
