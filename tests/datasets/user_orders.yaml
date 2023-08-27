@@ -1,0 +1,28 @@
+databases:
+  - test
+tables:
+  test.users:
+    primary_key: [id]
+    columns: [id, name|str]
+  test.orders:
+    primary_key: [id]
+    columns: [id, user_id, name|str]
+    foreign_keys:
+      - columns: [user_id]
+        dst_table: test.users
+        dst_columns: [id]
+  test.order_status:
+    primary_key: [id]
+    columns: [id, order_id, info|str]
+    foreign_keys:
+      - columns: [order_id]
+        dst_table: test.orders
+        dst_columns: [id]
+data:
+  test.users:
+    - [1, john]
+  test.orders:
+    - [1, 1, stuff]
+  test.order_status:
+    - [1, 1, pending]
+    - [2, 1, sent]

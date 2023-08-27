@@ -23,6 +23,10 @@ lint: format-check mypy pylint
 
 .PHONY: test
 test:
+	$(PYTHON) -m pytest -sv tests/ -m 'not mysql_live'
+
+.PHONY: test_all
+test_all:
 	$(PYTHON) -m pytest -sv tests/
 
 .PHONY: build
@@ -42,4 +46,3 @@ pypi-test: build
 pypi-live: build
 	TWINE_USERNAME=__token__ TWINE_PASSWORD="$(shell gpg -d live.pypi-token.gpg)" \
     $(PYTHON) -m twine upload dist/*
-
