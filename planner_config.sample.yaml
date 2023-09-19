@@ -13,7 +13,11 @@ targets:
   # Sample 100 users randomly from db1.users
   db1.users:
     amount: 100
-    # Additional possible filters
+    # Additional possible filters shown below. Multiple filters can be provided
+    # and the results will be merged together. Note that when using 'amount' you
+    # may get an unpredictable number of rows depending on how the random sample
+    # overlaps with the rows sampled by other filters.
+
     # in:
     #   user_id: [123, 456, 789]
     # like:

@@ -255,7 +255,6 @@ class Planner:
     ) -> SubsetPlan.SubsetQuery:
         materialize = False
         or_constraints = []
-        final_clause = ""
         for fk in table.foreign_keys + table.rev_foreign_keys:
             dst_key = (fk.dst_schema, fk.dst_table)
             if dst_key not in processed:
@@ -283,36 +282,39 @@ class Planner:
                 )
                 params[param_name] = conf_constraint.expression
 
+        target_amount_clause = ""
         if target is not None:
+            if target.amount is not None:
+                target_amount_clause = f" ORDER BY rand() LIMIT {target.amount}"
             if target.percent is not None:
                 or_constraints.append(f"rand() < {target.percent / 100.0}")
-            elif target.amount is not None:
-                final_clause = f" ORDER BY rand() LIMIT {target.amount}"
-            else:
-                for column, patterns in target.like.items():
-                    for pattern in patterns:
-                        param_name = f"param_{len(params)}"
-                        or_constraints.append(
-                            f"{mysql_identifier(column)} LIKE :{param_name}"
-                        )
-                        params[param_name] = pattern
-                for column, in_list in target.in_.items():
+            for column, patterns in target.like.items():
+                for pattern in patterns:
                     param_name = f"param_{len(params)}"
                     or_constraints.append(
-                        f"{mysql_identifier(column)} IN :{param_name}"
+                        f"{mysql_identifier(column)} LIKE :{param_name}"
                     )
-                    params[param_name] = list(in_list)
+                    params[param_name] = pattern
+            for column, in_list in target.in_.items():
+                param_name = f"param_{len(params)}"
+                or_constraints.append(f"{mysql_identifier(column)} IN :{param_name}")
+                params[param_name] = list(in_list)
 
-        query = f"SELECT * FROM {mysql_table_name(table.schema, table.name)}"
+        base_query = f"SELECT * FROM {mysql_table_name(table.schema, table.name)}"
         if or_constraints and and_constraints:
-            query = f"{query} WHERE ({' OR '.join(or_constraints)}) AND {' AND '.join(and_constraints)}"
+            query = f"{base_query} WHERE ({' OR '.join(or_constraints)}) AND {' AND '.join(and_constraints)}"
         elif or_constraints:
-            query = f"{query} WHERE {' OR '.join(or_constraints)}"
+            query = f"{base_query} WHERE {' OR '.join(or_constraints)}"
         elif and_constraints:
-            query = f"{query} WHERE {' AND '.join(and_constraints)}"
+            query = f"{base_query} WHERE {' AND '.join(and_constraints)}"
+        elif target and target.amount:
+            query = f"{base_query}{target_amount_clause}"
+            target_amount_clause = ""
+        if target_amount_clause:
+            query = f"{query} UNION ({base_query}{target_amount_clause})"
 
         return SubsetPlan.SubsetQuery(
-            query=query + final_clause,
+            query=query,
             params=params,
             materialize=materialize,
         )
