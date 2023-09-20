@@ -2,7 +2,7 @@ import abc
 import json
 import logging
 import os
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Set, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
@@ -28,9 +28,25 @@ def _mangle_query(query: str) -> str:
     return query.replace("<SAMPLED>", TMP_SUFFIX)
 
 
+def _multiply_column(
+    value: Optional[int], multiplier: int, iteration: int
+) -> Optional[int]:
+    if value is None:
+        return None
+    return value * multiplier + iteration
+
+
 class DirectoryOutputConfig(BaseModel):
     mode: Literal["directory"]
     directory: str
+
+
+class MultiplicityConfig(BaseModel):
+    multiplier: int = 1
+    infer_foreign_keys: bool = False
+    passthrough: List[str] = []
+    extra_columns: Dict[str, List[str]] = {}
+    ignore_primary_key_columns: Dict[str, List[str]] = {}
 
 
 class MysqlOutputConfig(DatabaseConfig):
@@ -47,6 +63,7 @@ class SamplerConfig(BaseModel):
     source: DatabaseConfig = DatabaseConfig()
     output: OutputType = DirectoryOutputConfig(mode="directory", directory="output")
     filters: Dict[str, List[FilterConfig]] = {}  # type: ignore
+    multiplicity: MultiplicityConfig = MultiplicityConfig()
 
 
 SamplerConfig.update_forward_refs()
@@ -61,6 +78,8 @@ class SamplerOutput(abc.ABC):
         result_set,
         *,
         filter_view: Optional[FilterView] = None,
+        multiplier: int = 1,
+        column_multipliers: Optional[Set[str]] = None,
     ) -> None:
         pass
 
@@ -92,14 +111,27 @@ class DirectoryOutput(SamplerOutput):
         result_set,
         *,
         filter_view: Optional[FilterView] = None,
+        multiplier: int = 1,
+        column_multipliers: Optional[Set[str]] = None,
     ) -> None:
         output_path = os.path.join(self.directory, f"{schema}.{table_name}.json")
         columns_out = filter_view.columns_out if filter_view else columns
+
+        multiplied_indexes = [
+            ind
+            for ind, col_name in enumerate(columns_out)
+            if col_name in (column_multipliers or set())
+        ]
         with open(output_path, "w", encoding="utf-8") as fdump:
             for row in result_set:
-                row = filter_view.filter_view(row) if filter_view else row
-                json.dump(dict(zip(columns_out, row)), fdump, default=str)
-                fdump.write("\n")
+                for iteration in range(multiplier):
+                    out_row = filter_view.filter_view(row) if filter_view else row
+                    for index in multiplied_indexes:
+                        out_row[index] = _multiply_column(
+                            out_row[index], multiplier, iteration
+                        )
+                    json.dump(dict(zip(columns_out, out_row)), fdump, default=str)
+                    fdump.write("\n")
 
 
 class MysqlOutput(SamplerOutput):
@@ -145,8 +177,15 @@ class MysqlOutput(SamplerOutput):
         result_set,
         *,
         filter_view: Optional[FilterView] = None,
+        multiplier: int = 1,
+        column_multipliers: Optional[Set[str]] = None,
     ) -> None:
         columns_out = filter_view.columns_out if filter_view else columns
+        multiplied_indexes = [
+            ind
+            for ind, col_name in enumerate(columns_out)
+            if col_name in (column_multipliers or set())
+        ]
         insert_query = (
             f"INSERT INTO {mysql_table_name(schema, table_name)} "
             f"({mysql_column_list(columns_out)}) VALUES "
@@ -166,10 +205,15 @@ class MysqlOutput(SamplerOutput):
                 buffer.clear()
 
             for row in result_set:
-                row = filter_view.filter_view(row) if filter_view else row
-                buffer.append(tuple(row))
-                if len(buffer) > flush_count:
-                    _flush_buffer()
+                for iteration in range(multiplier):
+                    out_row = filter_view.filter_view(row) if filter_view else row
+                    for index in multiplied_indexes:
+                        out_row[index] = _multiply_column(
+                            out_row[index], multiplier, iteration
+                        )
+                    buffer.append(tuple(out_row))
+                    if len(buffer) > flush_count:
+                        _flush_buffer()
             if buffer:
                 _flush_buffer()
 
@@ -188,15 +232,20 @@ class Sampler:
 
     def sample(self, plan: SubsetPlan, *, truncate: bool = False) -> None:
         meta, _ = DatabaseMetadata.from_engine(self.source_engine, list(plan.queries))
+        if self.config.multiplicity.infer_foreign_keys:
+            meta.infer_missing_foreign_keys()
         self._validate_filters(meta)
 
         insert_order = self.output.insert_order(list(plan.queries), truncate=truncate)
+        table_column_multipliers = self._get_multiplied_columns(
+            meta, list(plan.queries)
+        )
 
         if truncate:
             self._truncate(insert_order)
         with self.source_engine.connect() as conn:
             self._materialize_tables(conn, plan)
-            self._copy_results(conn, plan, insert_order)
+            self._copy_results(conn, plan, insert_order, table_column_multipliers)
 
     def _truncate(self, insert_order: List[str]) -> None:
         for table in reversed(insert_order):
@@ -232,7 +281,13 @@ class Sampler:
                     table_name,
                 )
 
-    def _copy_results(self, conn, plan: SubsetPlan, insert_order: List[str]):
+    def _copy_results(
+        self,
+        conn,
+        plan: SubsetPlan,
+        insert_order: List[str],
+        table_column_multipliers: Dict[str, Set[str]],
+    ):
         for table in insert_order:
             schema, table_name = parse_table_name(table)
 
@@ -268,12 +323,17 @@ class Sampler:
                     rows += 1
                     yield row
 
+            column_multipliers = table_column_multipliers.get(table)
             self.output.output_result_set(
                 schema,
                 table_name,
                 columns,
                 _count_rows(result),
                 filter_view=filter_view,
+                multiplier=1
+                if column_multipliers is None
+                else self.config.multiplicity.multiplier,
+                column_multipliers=column_multipliers,
             )
             LOGGER.info("Sampled %d rows for %s.%s", rows, schema, table_name)
 
@@ -289,3 +349,80 @@ class Sampler:
                 continue
 
             FilterViewChain.construct_filter(tbl.columns, filters)
+
+    def _get_multiplied_columns(
+        self, meta: DatabaseMetadata, tables: List[str]
+    ) -> Dict[str, Set[str]]:
+        """
+        Computes a mapping of tables to the list of columns that should be multiplied.
+        Here a 'multiplied' column must be an integer column that should be updated as
+        (column_value * multiplier + i) for each multiplied record 0 <= i < multiplier.
+
+        Generally any column that's not part of a passthrough table that meets these
+        criteria will be a 'multiplied' column:
+        - Is explicitly listed in multiplicity.extra_columns
+        - Is part of a primary key and table not listed in multiplicity.ignore_primary_key
+        - Is part of a foreign key to a non-passthrough table
+
+        Additionally the current implementation requires all multiplied columns to be
+        integral. This method will raise a ValueError if this is not the case.
+        """
+        if self.config.multiplicity.multiplier <= 1:
+            return {}
+
+        result: Dict[str, Set[str]] = {}
+        passthrough_tables = set(self.config.multiplicity.passthrough)
+
+        for table_name in tables:
+            if table_name in passthrough_tables:
+                continue
+
+            table = meta.tables[parse_table_name(table_name)]
+
+            # Calculate set of directly multiplied columns for this table
+            cols = set(self.config.multiplicity.extra_columns.get(table_name, []))
+            ignored_pk_cols = set(
+                self.config.multiplicity.ignore_primary_key_columns.get(table_name, [])
+            )
+            cols.update(set(table.primary_key) - ignored_pk_cols)
+
+            result[table_name] = cols
+
+        # Multiply foreing key columns that point at multplied columns. Being lazy
+        # about this closure; realistically most databases only have FKs that point directly
+        # at PKs so this should loop twice.
+        while True:
+            changes = False
+
+            for table_name in tables:
+                table = meta.tables[parse_table_name(table_name)]
+
+                cols = result.get(table_name, set())
+                start_len = len(cols)
+                for fk in table.foreign_keys:
+                    dst_mapped = result.get(f"{fk.dst_schema}.{fk.dst_table}", set())
+                    cols.update(set(fk.columns) & dst_mapped)
+
+                if cols and table_name in passthrough_tables:
+                    raise ValueError(
+                        "Passthrough foreign key points to multiplied column"
+                    )
+
+                changes = changes or len(cols) > start_len
+
+            if not changes:
+                break
+
+        for table_name in tables:
+            table = meta.tables[parse_table_name(table_name)]
+
+            # Verify multiplied columns are integer
+            for col_name in result.get(table_name, set()):
+                col = table.columns[col_name]
+                if not issubclass(col.type_.python_type, int):  # type: ignore
+                    raise ValueError(
+                        f"Primary key column {table_name}.{col_name} "
+                        "must be integral when using multiplicity"
+                    )
+
+        return result

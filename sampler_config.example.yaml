@@ -95,3 +95,36 @@ filters:
   - op: fake_email
     columns: [email_address]
     unique: true # optional, if set uses the 'unique' faker interface
+
+# The sampler supports multiplying rows for generating additional data. By
+# default this operates by mapping all primary keys and foreign keys into a
+# new key-space.
+#
+# Note: This functionality is currently only limited to integral primary
+# keys/foreign keys. Other types of keys, e.g. uuids, could be supported in
+# the future. Non-opaque keys, like email addresses, will not be supported.
+# Integer keys will be mapped into a new key-space using the equation:
+#
+#   new_id = source_id * multiplier + instance_id
+multiplicity:
+  # Multiplication factor. If set to 1 the rest of these fields are ignored.
+  multiplier: 10
+
+  # Similar to planner_config.infer_foreign_keys
+  infer_foreign_keys: true
+
+  # Tables that should not be multiplied. This often should just be the same
+  # as your plan passthrough tables.
+  passthrough:
+    - db1.ui_features
+
+  # Extra columns that should have their ID-space mapped that aren't part of a
+  # primary key or foreign key.
+  extra_columns:
+    db2.gadgets: [user_id]
+
+  # Some tables may have multiple columns that make up the primary key. By
+  # default every column will be mapped; you can set this field to disable
+  # mapping of some of them.
+  ignore_primary_key_columns:
+    db1.gizmo: [setting_name]

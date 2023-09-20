@@ -168,7 +168,7 @@ def _get_sample_config(args) -> SamplerConfig:
     except IOError as exc:
         LOGGER.error(
             "Could not open sampler config file %r: %s",
-            args.plan_config,
+            args.sample_config,
             exc,
             exc_info=args.verbose > 1,
         )
@@ -262,6 +262,7 @@ def main():
         level=logging.DEBUG if args.verbose > 0 else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    logging.getLogger("faker").setLevel(logging.INFO)
 
     try:
         if args.action == "plan":

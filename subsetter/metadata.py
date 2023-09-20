@@ -3,7 +3,7 @@ import dataclasses
 import itertools
 import logging
 from fnmatch import fnmatch
-from typing import Dict, List, Optional, Set, TextIO, Tuple
+from typing import Any, Dict, List, Optional, Set, TextIO, Tuple
 
 import sqlalchemy as sa
 
@@ -24,13 +24,21 @@ class ForeignKey:
     dst_columns: Tuple[str, ...]
 
 
+@dataclasses.dataclass(frozen=True)
+class ColumnDefinition:
+    type_: str
+    default: Any
+    comment: Optional[str]
+    nullable: bool
+
+
 class TableMetadata:
     def __init__(
         self,
         *,
         schema: str,
         name: str,
-        columns: Tuple[str, ...],
+        columns: Dict[str, ColumnDefinition],
         primary_key: Tuple[str, ...],
         foreign_keys: List[ForeignKey],
     ) -> None:
@@ -159,13 +167,19 @@ class DatabaseMetadata:
         num_selected_tables = len(table_queue)
 
         for schema, table_name in table_queue:
+            col_specs = inspector.get_columns(table_name, schema=schema)
             table = TableMetadata(
                 schema=schema,
                 name=table_name,
-                columns=tuple(
-                    column["name"]
-                    for column in inspector.get_columns(table_name, schema=schema)
-                ),
+                columns={
+                    column["name"]: ColumnDefinition(
+                        type_=column["type"],
+                        default=column["default"],
+                        comment=column["comment"],
+                        nullable=column["nullable"],
+                    )
+                    for column in col_specs
+                },
                 primary_key=tuple(
                     inspector.get_pk_constraint(table_name, schema=schema).get(
                         "constrained_columns", []
