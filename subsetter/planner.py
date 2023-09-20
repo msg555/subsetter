@@ -311,7 +311,7 @@ class Planner:
             query = f"{base_query}{target_amount_clause}"
             target_amount_clause = ""
         if target_amount_clause:
-            query = f"{query} UNION ({base_query}{target_amount_clause})"
+            query = f"{query} UNION DISTINCT ({base_query}{target_amount_clause})"
 
         return SubsetPlan.SubsetQuery(
             query=query,
