@@ -1,5 +1,5 @@
 import os
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Literal, Optional, Tuple
 
 import sqlalchemy as sa
 from pydantic import BaseModel
@@ -49,12 +49,22 @@ def database_url(
     )
 
 
+IsolationLevel = Literal[
+    "AUTOCOMMIT",
+    "READ COMMITTED",
+    "READ UNCOMMITTED",
+    "REPEATABLE READ",
+    "SERIALIZABLE",
+]
+
+
 class DatabaseConfig(BaseModel):
     host: Optional[str] = None
     port: Optional[int] = None
     username: Optional[str] = None
     password: Optional[str] = None
     session_sqls: List[str] = []
+    isolation_level: IsolationLevel = "AUTOCOMMIT"
 
     def database_url(
         self,
@@ -77,6 +87,7 @@ class DatabaseConfig(BaseModel):
     ) -> sa.engine.Engine:
         engine = sa.create_engine(
             self.database_url(env_prefix=env_prefix, drivername=drivername),
+            isolation_level=self.isolation_level,
             pool_pre_ping=True,
         )
 
