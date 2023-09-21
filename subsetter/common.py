@@ -76,7 +76,8 @@ class DatabaseConfig(BaseModel):
         drivername="mysql+pymysql",
     ) -> sa.engine.Engine:
         engine = sa.create_engine(
-            self.database_url(env_prefix=env_prefix, drivername=drivername)
+            self.database_url(env_prefix=env_prefix, drivername=drivername),
+            pool_pre_ping=True,
         )
 
         @sa.event.listens_for(engine, "connect")
