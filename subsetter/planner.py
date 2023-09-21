@@ -1,7 +1,6 @@
 import logging
 from typing import Dict, List, Literal, Optional, Set, Tuple, Union
 
-import sqlalchemy as sa
 from pydantic import BaseModel, Field
 
 from subsetter.common import (
@@ -65,11 +64,7 @@ class SubsetPlan(BaseModel):
 class Planner:
     def __init__(self, config: PlannerConfig) -> None:
         self.config = config
-        self.engine = sa.create_engine(
-            self.config.source.database_url(
-                env_prefix="SUBSET_SOURCE_",
-            )
-        )
+        self.engine = self.config.source.database_engine(env_prefix="SUBSET_SOURCE_")
         self.meta: DatabaseMetadata
         self.ignore_tables = {parse_table_name(table) for table in config.ignore}
         self.passthrough_tables = {

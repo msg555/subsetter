@@ -136,11 +136,7 @@ class DirectoryOutput(SamplerOutput):
 
 class MysqlOutput(SamplerOutput):
     def __init__(self, config: MysqlOutputConfig) -> None:
-        self.engine = sa.create_engine(
-            config.database_url(
-                env_prefix="SUBSET_DESTINATION_",
-            )
-        )
+        self.engine = config.database_engine(env_prefix="SUBSET_DESTINATION_")
 
     def truncate(self, schema: str, table_name: str) -> None:
         LOGGER.info("Truncating table %s.%s", schema, table_name)
@@ -223,10 +219,8 @@ class MysqlOutput(SamplerOutput):
 class Sampler:
     def __init__(self, config: SamplerConfig) -> None:
         self.config = config
-        self.source_engine = sa.create_engine(
-            self.config.source.database_url(
-                env_prefix="SUBSET_SOURCE_",
-            )
+        self.source_engine = self.config.source.database_engine(
+            env_prefix="SUBSET_SOURCE_"
         )
         self.output = SamplerOutput.from_config(config.output)
 

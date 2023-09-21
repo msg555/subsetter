@@ -1,5 +1,5 @@
 import os
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import sqlalchemy as sa
 from pydantic import BaseModel
@@ -54,6 +54,7 @@ class DatabaseConfig(BaseModel):
     port: Optional[int] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    session_sqls: List[str] = []
 
     def database_url(
         self,
@@ -68,3 +69,20 @@ class DatabaseConfig(BaseModel):
             username=self.username,
             password=self.password,
         )
+
+    def database_engine(
+        self,
+        env_prefix: Optional[str] = None,
+        drivername="mysql+pymysql",
+    ) -> sa.engine.Engine:
+        engine = sa.create_engine(
+            self.database_url(env_prefix=env_prefix, drivername=drivername)
+        )
+
+        @sa.event.listens_for(engine, "connect")
+        def _set_session_sqls(dbapi_connection, _):
+            with dbapi_connection.cursor() as cursor:
+                for session_sql in self.session_sqls:
+                    cursor.execute(session_sql)
+
+        return engine
