@@ -18,6 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 class PlannerConfig(BaseModel):
     class TargetConfig(BaseModel):
+        all_: bool = Field(False, alias="all")
         percent: Optional[float] = None
         amount: Optional[int] = None
         like: Dict[str, List[str]] = {}
@@ -254,13 +255,18 @@ class Planner:
             dst_key = (fk.dst_schema, fk.dst_table)
             if dst_key not in processed:
                 if dst_key in remaining:
-                    materialize = True
+                    dst_target = self.config.targets.get(
+                        f"{fk.dst_schema}.{fk.dst_table}"
+                    )
+                    if not dst_target or not dst_target.all_:
+                        materialize = True
                 continue
 
-            or_constraints.append(
-                f"{mysql_column_list(fk.columns)} IN (SELECT {mysql_column_list(fk.dst_columns)} "
-                f"FROM {mysql_table_name(fk.dst_schema, fk.dst_table + '<SAMPLED>')})"
-            )
+            if not target or not target.all_:
+                or_constraints.append(
+                    f"{mysql_column_list(fk.columns)} IN (SELECT {mysql_column_list(fk.dst_columns)} "
+                    f"FROM {mysql_table_name(fk.dst_schema, fk.dst_table + '<SAMPLED>')})"
+                )
 
         params: Dict[str, Union[int, float, str, List[Union[int, float, str]]]] = {}
         and_constraints = []
@@ -278,7 +284,9 @@ class Planner:
                 params[param_name] = conf_constraint.expression
 
         target_amount_clause = ""
-        if target is not None:
+        if target and target.all_:
+            pass
+        elif target:
             if target.amount is not None:
                 target_amount_clause = f" ORDER BY rand() LIMIT {target.amount}"
             if target.percent is not None:
@@ -296,13 +304,14 @@ class Planner:
                 params[param_name] = list(in_list)
 
         base_query = f"SELECT * FROM {mysql_table_name(table.schema, table.name)}"
+        query = base_query
         if or_constraints and and_constraints:
             query = f"{base_query} WHERE ({' OR '.join(or_constraints)}) AND {' AND '.join(and_constraints)}"
         elif or_constraints:
             query = f"{base_query} WHERE {' OR '.join(or_constraints)}"
         elif and_constraints:
             query = f"{base_query} WHERE {' AND '.join(and_constraints)}"
-        elif target and target.amount:
+        elif target_amount_clause:
             query = f"{base_query}{target_amount_clause}"
             target_amount_clause = ""
         if target_amount_clause:

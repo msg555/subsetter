@@ -18,6 +18,14 @@ from subsetter.filters import FilterConfig, FilterView, FilterViewChain
 from subsetter.metadata import DatabaseMetadata
 from subsetter.planner import SubsetPlan
 
+try:
+    from tqdm import tqdm  # type: ignore
+except ImportError:
+
+    def tqdm(x, **_):
+        return x
+
+
 LOGGER = logging.getLogger(__name__)
 
 # Name suffix to give to our temporary tables
@@ -282,7 +290,7 @@ class Sampler:
         insert_order: List[str],
         table_column_multipliers: Dict[str, Set[str]],
     ):
-        for table in insert_order:
+        for table in tqdm(insert_order, desc="table progress", unit="tables"):
             schema, table_name = parse_table_name(table)
 
             query = plan.queries.get(table)
@@ -313,7 +321,7 @@ class Sampler:
 
             def _count_rows(result):
                 nonlocal rows
-                for row in result:
+                for row in tqdm(result, desc="row progress", unit="rows"):
                     rows += 1
                     yield row
 

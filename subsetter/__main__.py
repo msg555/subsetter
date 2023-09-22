@@ -15,6 +15,11 @@ from subsetter.sampler import (
     SamplerConfig,
 )
 
+try:
+    from tqdm.contrib.logging import logging_redirect_tqdm  # type: ignore
+except ImportError:
+    logging_redirect_tqdm = contextlib.nullcontext
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -264,22 +269,23 @@ def main():
     )
     logging.getLogger("faker").setLevel(logging.INFO)
 
-    try:
-        if args.action == "plan":
-            _main_plan(args)
-        elif args.action == "sample":
-            _main_sample(args)
-        elif args.action == "subset":
-            _main_subset(args)
-        else:
-            raise RuntimeError("Unknown action")
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        LOGGER.error(
-            "Unexpected error: %s",
-            exc,
-            exc_info=args.verbose > 1,
-        )
-        sys.exit(1)
+    with logging_redirect_tqdm():
+        try:
+            if args.action == "plan":
+                _main_plan(args)
+            elif args.action == "sample":
+                _main_sample(args)
+            elif args.action == "subset":
+                _main_subset(args)
+            else:
+                raise RuntimeError("Unknown action")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            LOGGER.error(
+                "Unexpected error: %s",
+                exc,
+                exc_info=args.verbose > 1,
+            )
+            sys.exit(1)
 
 
 if __name__ == "__main__":
