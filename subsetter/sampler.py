@@ -197,33 +197,32 @@ class MysqlOutput(SamplerOutput):
             f"INSERT INTO {mysql_table_name(schema, table_name)} "
             f"({mysql_column_list(columns_out)}) VALUES "
         )
-        with self.engine.connect() as conn:
-            buffer: List[tuple] = []
+        buffer: List[tuple] = []
 
-            def _flush_buffer():
-                query = (
-                    f"{insert_query}{','.join(f':{ind}' for ind in range(len(buffer)))}"
-                )
+        def _flush_buffer():
+            query = (
+                f"{insert_query}{','.join(f':{ind}' for ind in range(len(buffer)))}"
+            )
+            with self.engine.connect() as conn:
                 conn.execute(
                     sa.text(query),
                     {str(ind): row for ind, row in enumerate(buffer)},
                 )
-                buffer.clear()
+                conn.commit()
+            buffer.clear()
 
-            for row in result_set:
-                for iteration in range(multiplier):
-                    out_row = filter_view.filter_view(row) if filter_view else row
-                    for index in multiplied_indexes:
-                        out_row[index] = _multiply_column(
-                            out_row[index], multiplier, iteration
-                        )
-                    buffer.append(tuple(out_row))
-                    if len(buffer) > DESTINATION_BUFFER_SIZE:
-                        _flush_buffer()
-            if buffer:
-                _flush_buffer()
-
-            conn.commit()
+        for row in result_set:
+            for iteration in range(multiplier):
+                out_row = filter_view.filter_view(row) if filter_view else row
+                for index in multiplied_indexes:
+                    out_row[index] = _multiply_column(
+                        out_row[index], multiplier, iteration
+                    )
+                buffer.append(tuple(out_row))
+                if len(buffer) > DESTINATION_BUFFER_SIZE:
+                    _flush_buffer()
+        if buffer:
+            _flush_buffer()
 
 
 class Sampler:
