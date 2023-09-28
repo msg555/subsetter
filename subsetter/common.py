@@ -4,6 +4,8 @@ from typing import Iterable, List, Literal, Optional, Tuple
 import sqlalchemy as sa
 from pydantic import BaseModel
 
+_NOT_SET = object()
+
 
 def mysql_identifier(identifier: str) -> str:
     assert "`" not in identifier

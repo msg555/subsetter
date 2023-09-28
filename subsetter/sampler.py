@@ -136,7 +136,7 @@ class DirectoryOutput(SamplerOutput):
         with open(output_path, "w", encoding="utf-8") as fdump:
             for row in result_set:
                 for iteration in range(multiplier):
-                    out_row = filter_view.filter_view(row) if filter_view else row
+                    out_row = filter_view.filter_view(row) if filter_view else list(row)
                     for index in multiplied_indexes:
                         out_row[index] = _multiply_column(
                             out_row[index], multiplier, iteration
@@ -200,9 +200,7 @@ class MysqlOutput(SamplerOutput):
         buffer: List[tuple] = []
 
         def _flush_buffer():
-            query = (
-                f"{insert_query}{','.join(f':{ind}' for ind in range(len(buffer)))}"
-            )
+            query = f"{insert_query}{','.join(f':{ind}' for ind in range(len(buffer)))}"
             with self.engine.connect() as conn:
                 conn.execute(
                     sa.text(query),
