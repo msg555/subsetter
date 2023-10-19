@@ -18,10 +18,21 @@ from subsetter.filters import FilterConfig, FilterView, FilterViewChain
 from subsetter.metadata import DatabaseMetadata
 from subsetter.planner import SubsetPlan
 
+try:
+    from tqdm import tqdm  # type: ignore
+except ImportError:
+
+    def tqdm(x, **_):
+        return x
+
+
 LOGGER = logging.getLogger(__name__)
 
 # Name suffix to give to our temporary tables
 TMP_SUFFIX = "_tmp_subsetter_"
+
+SOURCE_BUFFER_SIZE = 1024
+DESTINATION_BUFFER_SIZE = 1024
 
 
 def _mangle_query(query: str) -> str:
@@ -125,7 +136,7 @@ class DirectoryOutput(SamplerOutput):
         with open(output_path, "w", encoding="utf-8") as fdump:
             for row in result_set:
                 for iteration in range(multiplier):
-                    out_row = filter_view.filter_view(row) if filter_view else row
+                    out_row = filter_view.filter_view(row) if filter_view else list(row)
                     for index in multiplied_indexes:
                         out_row[index] = _multiply_column(
                             out_row[index], multiplier, iteration
@@ -186,34 +197,30 @@ class MysqlOutput(SamplerOutput):
             f"INSERT INTO {mysql_table_name(schema, table_name)} "
             f"({mysql_column_list(columns_out)}) VALUES "
         )
-        with self.engine.connect() as conn:
-            flush_count = 1024
-            buffer: List[tuple] = []
+        buffer: List[tuple] = []
 
-            def _flush_buffer():
-                query = (
-                    f"{insert_query}{','.join(f':{ind}' for ind in range(len(buffer)))}"
-                )
+        def _flush_buffer():
+            query = f"{insert_query}{','.join(f':{ind}' for ind in range(len(buffer)))}"
+            with self.engine.connect() as conn:
                 conn.execute(
                     sa.text(query),
                     {str(ind): row for ind, row in enumerate(buffer)},
                 )
-                buffer.clear()
+                conn.commit()
+            buffer.clear()
 
-            for row in result_set:
-                for iteration in range(multiplier):
-                    out_row = filter_view.filter_view(row) if filter_view else row
-                    for index in multiplied_indexes:
-                        out_row[index] = _multiply_column(
-                            out_row[index], multiplier, iteration
-                        )
-                    buffer.append(tuple(out_row))
-                    if len(buffer) > flush_count:
-                        _flush_buffer()
-            if buffer:
-                _flush_buffer()
-
-            conn.commit()
+        for row in result_set:
+            for iteration in range(multiplier):
+                out_row = filter_view.filter_view(row) if filter_view else row
+                for index in multiplied_indexes:
+                    out_row[index] = _multiply_column(
+                        out_row[index], multiplier, iteration
+                    )
+                buffer.append(tuple(out_row))
+                if len(buffer) > DESTINATION_BUFFER_SIZE:
+                    _flush_buffer()
+        if buffer:
+            _flush_buffer()
 
 
 class Sampler:
@@ -237,7 +244,10 @@ class Sampler:
 
         if truncate:
             self._truncate(insert_order)
-        with self.source_engine.connect() as conn:
+        with self.source_engine.execution_options(
+            stream_results=True,
+            yield_per=SOURCE_BUFFER_SIZE,
+        ).connect() as conn:
             self._materialize_tables(conn, plan)
             self._copy_results(conn, plan, insert_order, table_column_multipliers)
 
@@ -282,7 +292,7 @@ class Sampler:
         insert_order: List[str],
         table_column_multipliers: Dict[str, Set[str]],
     ):
-        for table in insert_order:
+        for table in tqdm(insert_order, desc="table progress", unit="tables"):
             schema, table_name = parse_table_name(table)
 
             query = plan.queries.get(table)
@@ -292,13 +302,13 @@ class Sampler:
             LOGGER.info("Sampling %s.%s ...", schema, table_name)
 
             if query.materialize:
-                result = conn.execute(
+                result = conn.execution_options(yield_per=SOURCE_BUFFER_SIZE).execute(
                     sa.text(
                         f"SELECT * FROM {mysql_table_name(schema, table_name + TMP_SUFFIX)}"
                     )
                 )
             else:
-                result = conn.execute(
+                result = conn.execution_options(yield_per=SOURCE_BUFFER_SIZE).execute(
                     sa.text(_mangle_query(query.query)),
                     query.params,
                 )
@@ -313,7 +323,7 @@ class Sampler:
 
             def _count_rows(result):
                 nonlocal rows
-                for row in result:
+                for row in tqdm(result, desc="row progress", unit="rows"):
                     rows += 1
                     yield row
 
