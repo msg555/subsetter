@@ -20,6 +20,7 @@ except ImportError:
     def tqdm(x, **_):
         return x
 
+
 LOGGER = logging.getLogger(__name__)
 
 _NOT_SET = object()
@@ -233,10 +234,7 @@ class Replayer:
                     f"{mysql_identifier(columns[index])}=:row_{index}"
                     for index in updated
                 )
-                bind.update(
-                    (f"row_{index}", record.values[index])
-                    for index in updated
-                )
+                bind.update((f"row_{index}", record.values[index]) for index in updated)
 
                 result = conn.execute(
                     sa.text(
