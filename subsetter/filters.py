@@ -454,7 +454,7 @@ FilterFakePostalCode = _simple_faker_class(
     "fake_postal_code", lambda faker: faker.postcode()
 )
 FilterFakeStreetAddress = _simple_faker_class(
-    "fake_street_address", lambda faker: faker.street_address()
+    "fake_street_address", lambda faker: f"{faker.building_number()} {faker.street_name()}"
 )
 FilterFakeStreetName = _simple_faker_class(
     "fake_street_name", lambda faker: faker.street_name()
