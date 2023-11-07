@@ -23,11 +23,7 @@ class PlannerConfig(BaseModel):
         amount: Optional[int] = None
         like: Dict[str, List[str]] = {}
         in_: Dict[str, List[Union[int, str]]] = Field({}, alias="in")
-
-    class ColumnConstraint(BaseModel):
-        column: str
-        operator: Literal["<", ">", "=", "<>", "!=", "in", "not in"]
-        expression: Union[int, float, str, List[Union[int, float, str]]]
+        sql: Optional[str] = None
 
     class IgnoreFKConfig(BaseModel):
         src_table: str
@@ -39,11 +35,13 @@ class PlannerConfig(BaseModel):
         dst_table: str
         dst_columns: List[str]
 
+    class ColumnConstraint(BaseModel):
+        column: str
+        operator: Literal["<", ">", "=", "<>", "!=", "in", "not in"]
+        expression: Union[int, float, str, List[Union[int, float, str]]]
+
     source: DatabaseConfig = DatabaseConfig()
-
-    global_constraints: List[ColumnConstraint] = []
     table_constraints: Dict[str, List[ColumnConstraint]] = {}
-
     select: List[str]
     targets: Dict[str, TargetConfig]
     ignore: List[str] = []
@@ -250,7 +248,7 @@ class Planner:
         target: Optional[PlannerConfig.TargetConfig] = None,
     ) -> SubsetPlan.SubsetQuery:
         materialize = False
-        or_constraints = []
+        fk_constraints = []
         for fk in table.foreign_keys + table.rev_foreign_keys:
             dst_key = (fk.dst_schema, fk.dst_table)
             if dst_key not in processed:
@@ -263,25 +261,25 @@ class Planner:
                 continue
 
             if not target or not target.all_:
-                or_constraints.append(
+                fk_constraints.append(
                     f"{mysql_column_list(fk.columns)} IN (SELECT {mysql_column_list(fk.dst_columns)} "
                     f"FROM {mysql_table_name(fk.dst_schema, fk.dst_table + '<SAMPLED>')})"
                 )
 
         params: Dict[str, Union[int, float, str, List[Union[int, float, str]]]] = {}
-        and_constraints = []
-
-        conf_constraints = (
-            self.config.global_constraints
-            + self.config.table_constraints.get(f"{table.schema}.{table.name}", [])
+        conf_constraints = self.config.table_constraints.get(
+            f"{table.schema}.{table.name}", []
         )
+        conf_constraints_sql = []
         for conf_constraint in conf_constraints:
             if conf_constraint.column in table.columns:
                 param_name = f"param_{len(params)}"
-                and_constraints.append(
+                conf_constraints_sql.append(
                     f"{mysql_identifier(conf_constraint.column)} {conf_constraint.operator} :{param_name}"
                 )
                 params[param_name] = conf_constraint.expression
+
+        target_constraints = []
 
         target_amount_clause = ""
         if target and target.all_:
@@ -290,32 +288,45 @@ class Planner:
             if target.amount is not None:
                 target_amount_clause = f" ORDER BY rand() LIMIT {target.amount}"
             if target.percent is not None:
-                or_constraints.append(f"rand() < {target.percent / 100.0}")
+                target_constraints.append(f"rand() < {target.percent / 100.0}")
+            if target.sql is not None:
+                target_constraints.append(f"({target.sql})")
             for column, patterns in target.like.items():
                 for pattern in patterns:
                     param_name = f"param_{len(params)}"
-                    or_constraints.append(
+                    target_constraints.append(
                         f"{mysql_identifier(column)} LIKE :{param_name}"
                     )
                     params[param_name] = pattern
             for column, in_list in target.in_.items():
                 param_name = f"param_{len(params)}"
-                or_constraints.append(f"{mysql_identifier(column)} IN :{param_name}")
+                target_constraints.append(
+                    f"{mysql_identifier(column)} IN :{param_name}"
+                )
                 params[param_name] = list(in_list)
 
         base_query = f"SELECT * FROM {mysql_table_name(table.schema, table.name)}"
+        fk_sql = " OR ".join(fk_constraints)
+        if conf_constraints_sql:
+            if fk_sql:
+                conf_constraints_sql.append(f"({fk_sql})")
+            fk_sql = " AND ".join(conf_constraints_sql)
+        target_sql = " AND ".join(target_constraints)
+
         query = base_query
-        if or_constraints and and_constraints:
-            query = f"{base_query} WHERE ({' OR '.join(or_constraints)}) AND {' AND '.join(and_constraints)}"
-        elif or_constraints:
-            query = f"{base_query} WHERE {' OR '.join(or_constraints)}"
-        elif and_constraints:
-            query = f"{base_query} WHERE {' AND '.join(and_constraints)}"
+        if fk_sql and target_amount_clause:
+            if target_sql:
+                query = f"{query} WHERE {fk_sql} UNION DISTINCT ({base_query} WHERE {target_sql}{target_amount_clause})"
+            else:
+                query = f"{query} WHERE {fk_sql} UNION DISTINCT ({base_query}{target_amount_clause})"
+        elif fk_sql and target_sql:
+            query = f"{base_query} WHERE {fk_sql} OR ({target_sql})"
+        elif fk_sql:
+            query = f"{base_query} WHERE {fk_sql}"
+        elif target_sql:
+            query = f"{base_query} WHERE {target_sql}{target_amount_clause}"
         elif target_amount_clause:
             query = f"{base_query}{target_amount_clause}"
-            target_amount_clause = ""
-        if target_amount_clause:
-            query = f"{query} UNION DISTINCT ({base_query}{target_amount_clause})"
 
         return SubsetPlan.SubsetQuery(
             query=query,

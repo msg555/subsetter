@@ -14,10 +14,13 @@ targets:
   db1.users:
     amount: 100
     # Additional possible filters shown below. Multiple filters can be provided
-    # and the results will be merged together. Note that when using 'amount' you
-    # may get an unpredictable number of rows depending on how the random sample
-    # overlaps with the rows sampled by other filters.
+    # and the results will be intersected together (except all which overrides
+    # everything). Note that additional rows may be included beyond what is
+    # specified here if needed when following foreign keys.
 
+    # all: true
+    # percent: 5.0
+    # sql: "EXISTS (SELECT * FROM db1.carts WHERE db1.carts.user_id = db1.users.user_id)"
     # in:
     #   user_id: [123, 456, 789]
     # like:
