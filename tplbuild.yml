@@ -1,0 +1,15 @@
+stage_image_name: '{{ stage_name }}'
+
+platforms:
+- linux/amd64
+- linux/arm64
+
+stages:
+  subsetter:
+    push_names:
+    - docker.io/msg555/{{ stage_name }}
+    - |
+      docker.io/msg555/{{ stage_name }}
+      {%- if vars.tag is defined -%}
+        :{{ vars.tag }}
+      {%- endif -%}

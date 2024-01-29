@@ -4,3 +4,4 @@
 dist
 *.egg-info
 *.pypi-token.gpg
+.tplbuilddata.json
