@@ -3,6 +3,7 @@ import dataclasses
 import string
 from datetime import datetime
 from fnmatch import fnmatch
+from importlib import import_module
 from random import Random
 from typing import (
     Any,
@@ -467,6 +468,61 @@ FilterFakeLongitude = _simple_faker_class(
 )
 
 
+class FilterPlugin(FilterColumns):
+    """
+    Filter that supports loading a custom plugin by module and class name.
+    """
+
+    PluginType = Callable[[List[Any]], Iterable[Any]]
+
+    class Config(SingleFilterConfig):
+        op: Literal["plugin"]
+        columns: List[str]
+
+        module: str
+        clazz: str = Field(..., alias="class")
+        kwargs: Dict[str, Any] = {}
+
+        def construct_filter(
+            self, columns_in: Iterable[str], *, filter_context=FilterContext()
+        ) -> FilterView:
+            try:
+                try:
+                    module = import_module(self.module)
+                except ImportError as exc:
+                    raise ValueError(
+                        f"Failed to import module {self.module} for plugin"
+                    ) from exc
+                try:
+                    clazz = getattr(module, self.clazz)
+                except AttributeError as exc:
+                    raise ValueError(
+                        f"Could not find plugin attribute {self.clazz} in {self.module}"
+                    ) from exc
+                plugin = clazz(**self.kwargs)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException as exc:
+                raise ValueError(
+                    f"Uncaught {type(exc).__name__} when attempting to "
+                    f"instantiate plugin {self.module}.{self.clazz}: {exc}"
+                ) from exc
+
+            return FilterPlugin(columns_in, self.columns, plugin)
+
+    def __init__(
+        self,
+        columns_in: Iterable[str],
+        columns_act: Iterable[str],
+        plugin: PluginType,
+    ) -> None:
+        super().__init__(columns_in, columns_act)
+        self.plugin = plugin
+
+    def filter_values(self, values: List[Any]) -> Iterable[Any]:
+        return self.plugin(values)
+
+
 SimpleFilterConfig: Type[SingleFilterConfig] = Annotated[  # type: ignore
     Union[
         FilterZero.Config,
@@ -496,6 +552,7 @@ SimpleFilterConfig: Type[SingleFilterConfig] = Annotated[  # type: ignore
         FilterFakeStreetName.Config,
         FilterFakeLatitude.Config,
         FilterFakeLongitude.Config,
+        FilterPlugin.Config,
     ],
     Field(..., discriminator="op"),
 ]
@@ -532,7 +589,7 @@ class MultiplexCondition(BaseModel):
             return value >= self.value
         if op == "matches":
             return fnmatch(value, self.value)
-        raise ValueError("Uknown op")
+        raise ValueError("Unknown op")
 
 
 class FilterMultiplex(FilterView):

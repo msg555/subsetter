@@ -108,6 +108,25 @@ filters:
     columns: [email_address]
     unique: true # optional, if set uses the 'unique' faker interface
 
+  # Arbitrary filters can be implemented dynamically. To do so create a Python
+  # module that can be imported by the subsetter. The module should define a
+  # factory method that will be passed a list of the requested columns and
+  # should return a list of the values after filtering them. For example you
+  # could write:
+  #
+  # class MyFilter:
+  #     def __init__(self, mysuffix: str):
+  #         self.suffix = mysuffix
+  #
+  #         def __call__(self, values):
+  #             return [f"{value}-{self.suffix}" for value in values]
+  - op: plugin
+    columns: [col1, col2]
+    module: fully.qualified.module
+    class: MyFilter
+    kwargs:
+      mysuffix: hello!
+
 # The sampler supports multiplying rows for generating additional data. By
 # default this operates by mapping all primary keys and foreign keys into a
 # new key-space.
