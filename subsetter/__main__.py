@@ -23,6 +23,15 @@ except ImportError:
 LOGGER = logging.getLogger(__name__)
 
 
+@contextlib.contextmanager
+def _open_config_path(path: str):
+    if path == "-":
+        yield sys.stdin
+    else:
+        with open(path, "r", encoding="utf-8") as fconfig:
+            yield fconfig
+
+
 def _add_plan_args(parser, *, subset_action: bool = False):
     parser.add_argument(
         "--plan-config" if subset_action else "--config",
@@ -161,7 +170,7 @@ def _get_sample_config(args) -> SamplerConfig:
         raise RuntimeError("unexpected output subcommand")
 
     try:
-        with open(args.sample_config, "r", encoding="utf-8") as fconfig:
+        with _open_config_path(args.sample_config) as fconfig:
             config = SamplerConfig.parse_obj(yaml.safe_load(fconfig))
     except ValueError as exc:
         LOGGER.error(
@@ -185,7 +194,7 @@ def _get_sample_config(args) -> SamplerConfig:
 
 def _get_plan_config(args) -> PlannerConfig:
     try:
-        with open(args.plan_config, "r", encoding="utf-8") as fconfig:
+        with _open_config_path(args.plan_config) as fconfig:
             return PlannerConfig.parse_obj(yaml.safe_load(fconfig))
     except ValueError as exc:
         LOGGER.error(
@@ -229,7 +238,7 @@ def _main_plan(args):
 
 def _main_sample(args):
     try:
-        with open(args.plan, "r", encoding="utf-8") as fplan:
+        with _open_config_path(args.plan) as fplan:
             plan = SubsetPlan.parse_obj(yaml.safe_load(fplan))
     except ValueError as exc:
         LOGGER.error(

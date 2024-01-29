@@ -94,10 +94,6 @@ class Planner:
             self.meta.infer_missing_foreign_keys()
         self._remove_ignore_fks()
         self._add_extra_fks()
-
-        with open("graph.dot", "w", encoding="utf-8") as fgraph:
-            self.meta.output_graphviz(fgraph)
-
         self._check_ignore_tables()
         self._check_passthrough_tables()
 

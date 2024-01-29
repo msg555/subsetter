@@ -1,0 +1,6 @@
+*
+!subsetter
+!tests
+!pyproject.toml
+!setup.cfg
+!requirements-dev.txt
