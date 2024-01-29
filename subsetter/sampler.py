@@ -334,9 +334,11 @@ class Sampler:
                 columns,
                 _count_rows(result),
                 filter_view=filter_view,
-                multiplier=1
-                if column_multipliers is None
-                else self.config.multiplicity.multiplier,
+                multiplier=(
+                    1
+                    if column_multipliers is None
+                    else self.config.multiplicity.multiplier
+                ),
                 column_multipliers=column_multipliers,
             )
             LOGGER.info("Sampled %d rows for %s.%s", rows, schema, table_name)
