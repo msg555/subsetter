@@ -1,6 +1,6 @@
 FROM python:3.12-alpine AS subsetter
 
-RUN pip install -U pip
+RUN pip install -U pip tqdm
 
 WORKDIR /subsetter
 
