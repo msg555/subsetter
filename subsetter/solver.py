@@ -1,9 +1,13 @@
 import copy
 import json
+import logging
 from typing import Dict, List, Optional, Set, TypeVar
 
 NodeT = TypeVar("NodeT")
 GraphT = Dict[NodeT, List[NodeT]]
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class InversionException(Exception):
@@ -132,7 +136,7 @@ def order_graph(G: Dict[NodeT, List[NodeT]], source: NodeT) -> List[NodeT]:
         try:
             G_rem = invert_edges_into(G_rem, u)
         except InversionException as exc:
-            print(f"Attempted to pivot on {u} but failed with:", exc)
+            LOGGER.exception(f"Attempted to pivot on %s but failed", u)
         else:
             order = order_graph(subgraph(G, set(visited)), source)
             order.append(u)

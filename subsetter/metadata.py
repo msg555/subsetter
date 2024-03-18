@@ -56,7 +56,11 @@ class TableMetadata:
         return f"{self.schema}.{self.name}"
 
 
-def _get_fks(engine) -> Dict[Tuple[str, str], List[ForeignKey]]:
+def _get_fks_mysql(engine: sa.engine.Engine) -> Dict[Tuple[str, str], List[ForeignKey]]:
+    """
+    Optimized query to load all foreign key relationships for a mysql database
+    """
+
     @dataclasses.dataclass(order=True)
     class FKConstraint:
         ordinal_position: int
@@ -122,6 +126,37 @@ def _get_fks(engine) -> Dict[Tuple[str, str], List[ForeignKey]]:
         )
 
     return all_fks
+
+
+def _get_fks_generic(
+    engine: sa.engine.Engine,
+) -> Dict[Tuple[str, str], List[ForeignKey]]:
+    """
+    Generic implementation to load all foreign key relationships using the
+    SQLAlchemy inspector interface.
+    """
+    result = {}
+
+    inspector = sa.inspect(engine)
+    for schema in inspector.get_schema_names():
+        for table_name in inspector.get_table_names(schema=schema):
+            result[(schema, table_name)] = [
+                ForeignKey(
+                    columns=tuple(key["constrained_columns"]),
+                    dst_schema=key["referred_schema"],
+                    dst_table=key["referred_table"],
+                    dst_columns=tuple(key["referred_columns"]),
+                )
+                for key in inspector.get_foreign_keys(table_name, schema=schema)
+            ]
+
+    return result
+
+
+def _get_fks(engine: sa.engine.Engine) -> Dict[Tuple[str, str], List[ForeignKey]]:
+    if engine.name == "mysql":
+        return _get_fks_mysql(engine)
+    return _get_fks_generic(engine)
 
 
 class DatabaseMetadata:
@@ -233,6 +268,11 @@ class DatabaseMetadata:
                         table.foreign_keys.append(fk)
 
     def normalize_foreign_keys(self) -> None:
+        """
+        If table A has a foreign key to table B and they both share a foreign
+        key on the same column in table C, remove the foreign key from table A
+        assuming it is redundant.
+        """
         fk_sets = {
             table_key: {
                 (fk.dst_schema, fk.dst_table, fk.dst_columns)
@@ -244,11 +284,13 @@ class DatabaseMetadata:
             child_fk_sets = set()
             for fk in table.foreign_keys:
                 child_fk_sets |= fk_sets[(fk.dst_schema, fk.dst_table)]
-            table.foreign_keys = [
-                fk
-                for fk in table.foreign_keys
-                if (fk.dst_schema, fk.dst_table, fk.dst_columns) not in child_fk_sets
-            ]
+            fk_out = []
+            for fk in table.foreign_keys:
+                if (fk.dst_schema, fk.dst_table, fk.dst_columns) not in child_fk_sets:
+                    fk_out.append(fk)
+                else:
+                    LOGGER.info("Normalizing foreign key %s.%s", fk)
+            table.foreign_keys = fk_out
 
     def toposort(self) -> List[TableMetadata]:
         graph = self.as_graph()

@@ -5,13 +5,23 @@ from pydantic import BaseModel, Field
 
 from subsetter.common import (
     DatabaseConfig,
-    mysql_column_list,
-    mysql_identifier,
-    mysql_table_name,
+    SQLKnownOperator,
+    SQLLiteralType,
+    SQLStatementSelect,
+    SQLStatementUnion,
+    SQLTableIdentifier,
+    SQLTableQuery,
+    SQLWhereClause,
+    SQLWhereClauseAnd,
+    SQLWhereClauseOperator,
+    SQLWhereClauseOr,
+    SQLWhereClauseRandom,
+    SQLWhereClauseSQL,
     parse_table_name,
 )
 from subsetter.metadata import DatabaseMetadata, ForeignKey, TableMetadata
 from subsetter.solver import dfs, order_graph, reverse_graph, subgraph
+from subsetter.sql_dialects import SQLDialectEncoder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +32,7 @@ class PlannerConfig(BaseModel):
         percent: Optional[float] = None
         amount: Optional[int] = None
         like: Dict[str, List[str]] = {}
-        in_: Dict[str, List[Union[int, str]]] = Field({}, alias="in")
+        in_: Dict[str, List[SQLLiteralType]] = Field({}, alias="in")
         sql: Optional[str] = None
 
     class IgnoreFKConfig(BaseModel):
@@ -37,8 +47,8 @@ class PlannerConfig(BaseModel):
 
     class ColumnConstraint(BaseModel):
         column: str
-        operator: Literal["<", ">", "=", "<>", "!=", "in", "not in"]
-        expression: Union[int, float, str, List[Union[int, float, str]]]
+        operator: SQLKnownOperator
+        values: Union[SQLLiteralType, List[SQLLiteralType]]
 
     source: DatabaseConfig = DatabaseConfig()
     table_constraints: Dict[str, List[ColumnConstraint]] = {}
@@ -49,15 +59,12 @@ class PlannerConfig(BaseModel):
     ignore_fks: List[IgnoreFKConfig] = []
     extra_fks: List[ExtraFKConfig] = []
     infer_foreign_keys: bool = False
+    normalize_foreign_keys: bool = False
+    output_sql: bool = False
 
 
 class SubsetPlan(BaseModel):
-    class SubsetQuery(BaseModel):
-        query: str
-        params: Dict[str, Union[int, float, str, List[Union[int, float, str]]]] = {}
-        materialize: bool = False
-
-    queries: Dict[str, SubsetQuery]
+    queries: Dict[str, SQLTableQuery]
 
 
 class Planner:
@@ -92,6 +99,8 @@ class Planner:
 
         if self.config.infer_foreign_keys:
             self.meta.infer_missing_foreign_keys()
+        if self.config.normalize_foreign_keys:
+            self.meta.normalize_foreign_keys()
         self._remove_ignore_fks()
         self._add_extra_fks()
         self._check_ignore_tables()
@@ -100,10 +109,16 @@ class Planner:
         order = self._solve_order()
         self.meta.compute_reverse_keys()
 
-        queries = {}
+        queries: Dict[str, SQLTableQuery] = {}
         for schema, table_name in self.passthrough_tables:
-            queries[f"{schema}.{table_name}"] = SubsetPlan.SubsetQuery(
-                query=f"SELECT * FROM {mysql_table_name(schema, table_name)}",
+            queries[f"{schema}.{table_name}"] = SQLTableQuery(
+                statement=SQLStatementSelect(
+                    type_="select",
+                    from_=SQLTableIdentifier(
+                        table_schema=schema,
+                        table_name=table_name,
+                    ),
+                )
             )
 
         processed = set()
@@ -119,6 +134,18 @@ class Planner:
                 target=self.config.targets.get(table),
             )
 
+        if self.config.output_sql:
+            for table, query in queries.items():
+                sql_params = {}
+                queries[table] = SQLTableQuery(
+                    sql=query.statement.build(
+                        SQLDialectEncoder.from_dialect(self.config.source.dialect),
+                        sql_params,
+                    ),
+                    sql_params=sql_params,
+                    materialize=query.materialize,
+                )
+
         return SubsetPlan(queries=queries)
 
     def _solve_order(self) -> List[str]:
@@ -126,8 +153,6 @@ class Planner:
         Attempts to compute an ordering of non-passthrough, non-ignored tables
         satisfies all constraints.
         """
-        self.meta.normalize_foreign_keys()
-
         source = ""
         graph = self.meta.as_graph(
             ignore_tables=self.passthrough_tables | self.ignore_tables
@@ -242,9 +267,9 @@ class Planner:
         processed: Set[Tuple[str, str]],
         remaining: Set[Tuple[str, str]],
         target: Optional[PlannerConfig.TargetConfig] = None,
-    ) -> SubsetPlan.SubsetQuery:
+    ) -> SQLTableQuery:
         materialize = False
-        fk_constraints = []
+        fk_constraints: List[SQLWhereClause] = []
         for fk in table.foreign_keys + table.rev_foreign_keys:
             dst_key = (fk.dst_schema, fk.dst_table)
             if dst_key not in processed:
@@ -258,42 +283,81 @@ class Planner:
 
             if not target or not target.all_:
                 fk_constraints.append(
-                    f"{mysql_column_list(fk.columns)} IN (SELECT {mysql_column_list(fk.dst_columns)} "
-                    f"FROM {mysql_table_name(fk.dst_schema, fk.dst_table + '<SAMPLED>')})"
+                    SQLWhereClauseOperator(
+                        type_="operator",
+                        operator="in",
+                        columns=fk.columns,
+                        values=SQLStatementSelect(
+                            type_="select",
+                            columns=fk.dst_columns,
+                            from_=SQLTableIdentifier(
+                                table_schema=fk.dst_schema,
+                                table_name=fk.dst_table,
+                                sampled=True,
+                            ),
+                        ),
+                    )
                 )
 
-        params: Dict[str, Union[int, float, str, List[Union[int, float, str]]]] = {}
+        params: Dict[str, Any] = {}
         conf_constraints = self.config.table_constraints.get(
             f"{table.schema}.{table.name}", []
         )
-        conf_constraints_sql = []
+        conf_constraints_sql: List[SQLWhereClause] = []
         for conf_constraint in conf_constraints:
             if conf_constraint.column in table.columns:
-                param_name = f"param_{len(params)}"
-                conf_constraints_sql.append(
-                    f"{mysql_identifier(conf_constraint.column)} {conf_constraint.operator} :{param_name}"
-                )
-                params[param_name] = conf_constraint.expression
-
-        target_constraints = []
-
-        target_amount_clause = ""
-        if target and target.all_:
-            pass
-        elif target:
-            if target.amount is not None:
-                target_amount_clause = f" ORDER BY rand() LIMIT {target.amount}"
-            if target.percent is not None:
-                target_constraints.append(f"rand() < {target.percent / 100.0}")
-            if target.sql is not None:
-                target_constraints.append(f"({target.sql})")
-            for column, patterns in target.like.items():
-                for pattern in patterns:
-                    param_name = f"param_{len(params)}"
-                    target_constraints.append(
-                        f"{mysql_identifier(column)} LIKE :{param_name}"
+                conf_constraints.append(
+                    SQLWhereClauseOperator(
+                        operator=conf_constraint.operator,
+                        columns=[conf_constraint.column],
+                        values=conf_contraint.values,
                     )
-                    params[param_name] = pattern
+                )
+
+        # Calculate initial foreign-key / config constraint statement
+        statements: List[SQLStatementSelect] = [
+            SQLStatementSelect(
+                type_="select",
+                from_=SQLTableIdentifier(
+                    table_schema=table.schema,
+                    table_name=table.name,
+                ),
+                where=SQLWhereClauseAnd(
+                    type_="and",
+                    conditions=[
+                        *conf_constraints,
+                        SQLWhereClauseOr(
+                            type_="or",
+                            conditions=fk_constraints,
+                        ),
+                    ],
+                ),
+            )
+        ]
+
+        # If targetted also calculate target constraint statement
+        if target:
+            target_constraints: List[SQLWhereClause] = []
+            if target.percent is not None:
+                target_constraints.append(SQLWhereRandomFilter(target.percent / 100.0))
+
+            if target.sql is not None:
+                target_constraints.append(SQLWhereClauseSQL(target.sql))
+
+            for column, patterns in target.like.items():
+                target_constraints.append(
+                    SQLWhereClauseOr(
+                        conditions=[
+                            SQLWhereClauseOperator(
+                                operator="like",
+                                columns=[column],
+                                values=pattern,
+                            )
+                            for pattern in patterns
+                        ]
+                    )
+                )
+
             for column, in_list in target.in_.items():
                 param_name = f"param_{len(params)}"
                 target_constraints.append(
@@ -301,31 +365,25 @@ class Planner:
                 )
                 params[param_name] = list(in_list)
 
-        base_query = f"SELECT * FROM {mysql_table_name(table.schema, table.name)}"
-        fk_sql = " OR ".join(fk_constraints)
-        if conf_constraints_sql:
-            if fk_sql:
-                conf_constraints_sql.append(f"({fk_sql})")
-            fk_sql = " AND ".join(conf_constraints_sql)
-        target_sql = " AND ".join(target_constraints)
+            if target.all_:
+                target_constraints.clear()
 
-        query = base_query
-        if fk_sql and target_amount_clause:
-            if target_sql:
-                query = f"{query} WHERE {fk_sql} UNION DISTINCT ({base_query} WHERE {target_sql}{target_amount_clause})"
-            else:
-                query = f"{query} WHERE {fk_sql} UNION DISTINCT ({base_query}{target_amount_clause})"
-        elif fk_sql and target_sql:
-            query = f"{base_query} WHERE {fk_sql} OR ({target_sql})"
-        elif fk_sql:
-            query = f"{base_query} WHERE {fk_sql}"
-        elif target_sql:
-            query = f"{base_query} WHERE {target_sql}{target_amount_clause}"
-        elif target_amount_clause:
-            query = f"{base_query}{target_amount_clause}"
+            statements.append(
+                SQLStatementSelect(
+                    type_="select",
+                    from_=SQLTableIdentifier(
+                        table_schema=table.schema,
+                        table_name=table.name,
+                    ),
+                    where=SQLWhereClauseAnd(type_="and", conditions=target_constraints),
+                    limit=target.amount,
+                )
+            )
 
-        return SubsetPlan.SubsetQuery(
-            query=query,
-            params=params,
+        return SQLTableQuery(
+            statement=SQLStatementUnion(
+                type_="union",
+                statements=statements,
+            ).simplify(),
             materialize=materialize,
         )
