@@ -21,7 +21,7 @@ from uuid import uuid4
 
 from faker import Faker
 from pydantic import BaseModel, Field
-from pydantic.typing import Annotated
+from typing_extensions import Annotated
 
 EPOCH = datetime(1970, 1, 1, 0, 0)
 
@@ -336,11 +336,6 @@ class FilterConstant(FilterColumns):
         columns: List[str]
         values: List[FilterConstantTypes]
 
-        class Config:
-            """Sometimes your configs have configs and that's okay"""
-
-            smart_union = True
-
         def construct_filter(
             self, columns_in: Iterable[str], *, filter_context=FilterContext()
         ) -> FilterView:
@@ -475,7 +470,7 @@ class FilterPlugin(FilterColumns):
 
     PluginType = Callable[[List[Any]], Iterable[Any]]
 
-    class Config(SingleFilterConfig):
+    class Config(SingleFilterConfig):  # type: ignore
         op: Literal["plugin"]
         columns: List[str]
 

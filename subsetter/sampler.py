@@ -6,9 +6,14 @@ from typing import Any, Dict, List, Literal, Optional, Set, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
-from pydantic.typing import Annotated
+from typing_extensions import Annotated
 
-from subsetter.common import DatabaseConfig, SQLDialectEncoder, parse_table_name
+from subsetter.common import (
+    DEFAULT_DIALECT,
+    DatabaseConfig,
+    SQLDialectEncoder,
+    parse_table_name,
+)
 from subsetter.filters import FilterConfig, FilterView, FilterViewChain
 from subsetter.metadata import DatabaseMetadata
 from subsetter.planner import SubsetPlan
@@ -134,7 +139,7 @@ class DirectoryOutput(SamplerOutput):
 
 class DatabaseOutput(SamplerOutput):
     def __init__(self, config: DatabaseOutputConfig) -> None:
-        self.sql_enc = SQLDialectEncoder.from_dialect(config.dialect)
+        self.sql_enc = SQLDialectEncoder.from_dialect(config.dialect or DEFAULT_DIALECT)
         self.engine = config.database_engine(env_prefix="SUBSET_DESTINATION_")
 
     def truncate(self, schema: str, table_name: str) -> None:
@@ -219,7 +224,9 @@ class Sampler:
         self.source_engine = self.config.source.database_engine(
             env_prefix="SUBSET_SOURCE_"
         )
-        self.sql_enc = SQLDialectEncoder.from_dialect(self.config.source.dialect)
+        self.sql_enc = SQLDialectEncoder.from_dialect(
+            self.config.source.dialect or DEFAULT_DIALECT
+        )
         self.output = SamplerOutput.from_config(config.output)
 
     def sample(self, plan: SubsetPlan, *, truncate: bool = False) -> None:
@@ -252,7 +259,7 @@ class Sampler:
 
             LOGGER.info("Materializing sample for %s", table)
 
-            params = {}
+            params: Dict[str, Any] = {}
             sample_sql = query.build(self.sql_enc, params)
 
             try:
@@ -292,12 +299,7 @@ class Sampler:
 
             LOGGER.info("Sampling %s.%s ...", schema, table_name)
 
-            exec_options = {
-                "stream_results": True,
-                "yield_per": SOURCE_BUFFER_SIZE,
-            }
-
-            params = {}
+            params: Dict[str, Any] = {}
             if query.materialize:
                 query_sql = f"SELECT * FROM {self.sql_enc.table_name(schema, table_name, sampled=True)}"
             else:

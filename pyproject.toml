@@ -59,4 +59,10 @@ extension-pkg-allow-list = [
 [tool.pytest.ini_options]
 markers = [
     "mysql_live",
+    "postgres_live",
+]
+
+[tool.mypy]
+plugins = [
+  "pydantic.mypy",
 ]

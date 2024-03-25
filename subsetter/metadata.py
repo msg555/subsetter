@@ -139,15 +139,15 @@ def _get_fks_generic(
 
     inspector = sa.inspect(engine)
     for schema in inspector.get_schema_names():
-        for table_name in inspector.get_table_names(schema=schema):
-            result[(schema, table_name)] = [
+        for table_key, table_fks in inspector.get_multi_foreign_keys(schema).items():
+            result[(table_key[0] or schema, table_key[1])] = [
                 ForeignKey(
                     columns=tuple(key["constrained_columns"]),
-                    dst_schema=key["referred_schema"],
+                    dst_schema=key["referred_schema"] or schema,
                     dst_table=key["referred_table"],
                     dst_columns=tuple(key["referred_columns"]),
                 )
-                for key in inspector.get_foreign_keys(table_name, schema=schema)
+                for key in table_fks
             ]
 
     return result
@@ -202,6 +202,8 @@ class DatabaseMetadata:
         num_selected_tables = len(table_queue)
 
         for schema, table_name in table_queue:
+            # TODO: Consider using inspector.get_multi_columns
+            # TODO: Consider using inspector.get_multi_pk_constraint
             col_specs = inspector.get_columns(table_name, schema=schema)
             table = TableMetadata(
                 schema=schema,
@@ -289,7 +291,7 @@ class DatabaseMetadata:
                 if (fk.dst_schema, fk.dst_table, fk.dst_columns) not in child_fk_sets:
                     fk_out.append(fk)
                 else:
-                    LOGGER.info("Normalizing foreign key %s.%s", fk)
+                    LOGGER.info("Normalizing foreign key %s", fk)
             table.foreign_keys = fk_out
 
     def toposort(self) -> List[TableMetadata]:

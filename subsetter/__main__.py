@@ -182,7 +182,7 @@ def _get_sample_config(args) -> SamplerConfig:
 
     try:
         with _open_config_path(args.sample_config) as fconfig:
-            config = SamplerConfig.parse_obj(yaml.safe_load(fconfig))
+            config = SamplerConfig.model_validate(yaml.safe_load(fconfig))
     except ValueError as exc:
         LOGGER.error(
             "Unexpected sampler config file format: %s",
@@ -206,7 +206,7 @@ def _get_sample_config(args) -> SamplerConfig:
 def _get_plan_config(args) -> PlannerConfig:
     try:
         with _open_config_path(args.plan_config) as fconfig:
-            return PlannerConfig.parse_obj(yaml.safe_load(fconfig))
+            return PlannerConfig.model_validate(yaml.safe_load(fconfig))
     except ValueError as exc:
         LOGGER.error(
             "Unexpected plan file format: %s",
@@ -250,7 +250,7 @@ def _main_plan(args):
 def _main_sample(args):
     try:
         with _open_config_path(args.plan) as fplan:
-            plan = SubsetPlan.parse_obj(yaml.safe_load(fplan))
+            plan = SubsetPlan.model_validate(yaml.safe_load(fplan))
     except ValueError as exc:
         LOGGER.error(
             "Unexpected plan file format: %s",

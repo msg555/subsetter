@@ -1,5 +1,3 @@
-databases:
-  - test
 tables:
   test.users:
     primary_key: [id]

@@ -9,7 +9,7 @@ DatabaseDialect = Literal[
 
 class SQLDialectEncoder(abc.ABC):
     @staticmethod
-    def from_dialect(dialect: DatabaseDialect) -> "SQLDialect":
+    def from_dialect(dialect: DatabaseDialect) -> "SQLDialectEncoder":
         if dialect == "mysql":
             return MysqlDialectEncoder()
         if dialect == "postgres":
@@ -29,7 +29,7 @@ class SQLDialectEncoder(abc.ABC):
         """Encode a list of column names"""
 
     @abc.abstractmethod
-    def make_temp_table(self, table_name: str, as_sql: str) -> str:
+    def make_temp_table(self, schema: str, table: str, as_sql: str) -> str:
         """Encode a statement to create a temporary table"""
 
     @abc.abstractmethod

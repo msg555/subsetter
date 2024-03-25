@@ -135,8 +135,8 @@ def order_graph(G: Dict[NodeT, List[NodeT]], source: NodeT) -> List[NodeT]:
 
         try:
             G_rem = invert_edges_into(G_rem, u)
-        except InversionException as exc:
-            LOGGER.exception(f"Attempted to pivot on %s but failed", u)
+        except InversionException:
+            LOGGER.exception("Attempted to pivot on %s but failed", u)
         else:
             order = order_graph(subgraph(G, set(visited)), source)
             order.append(u)

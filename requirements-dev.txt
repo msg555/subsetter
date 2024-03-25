@@ -1,10 +1,12 @@
-black~=24.1.1
+black~=24.3.0
 isort~=5.13.2
-mypy~=1.8.0
-pylint~=3.0.3
+mypy~=1.9.0
+pylint~=3.1.0
 
 types-PyYAML
+types-psycopg2
 pylint_pydantic
 
-pytest ~= 8.0
+pytest ~= 8.1
 pytest-mysql ~= 2.5
+pytest-postgresql ~= 6.0

@@ -1,9 +1,10 @@
 import logging
-from typing import Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pydantic import BaseModel, Field
 
 from subsetter.common import (
+    DEFAULT_DIALECT,
     DatabaseConfig,
     SQLKnownOperator,
     SQLLiteralType,
@@ -136,10 +137,14 @@ class Planner:
 
         if self.config.output_sql:
             for table, query in queries.items():
-                sql_params = {}
+                if not query.statement:
+                    continue
+                sql_params: Dict[str, Any] = {}
                 queries[table] = SQLTableQuery(
                     sql=query.statement.build(
-                        SQLDialectEncoder.from_dialect(self.config.source.dialect),
+                        SQLDialectEncoder.from_dialect(
+                            self.config.source.dialect or DEFAULT_DIALECT
+                        ),
                         sql_params,
                     ),
                     sql_params=sql_params,
@@ -286,10 +291,10 @@ class Planner:
                     SQLWhereClauseOperator(
                         type_="operator",
                         operator="in",
-                        columns=fk.columns,
+                        columns=list(fk.columns),
                         values=SQLStatementSelect(
                             type_="select",
-                            columns=fk.dst_columns,
+                            columns=list(fk.dst_columns),
                             from_=SQLTableIdentifier(
                                 table_schema=fk.dst_schema,
                                 table_name=fk.dst_table,
@@ -299,18 +304,18 @@ class Planner:
                     )
                 )
 
-        params: Dict[str, Any] = {}
         conf_constraints = self.config.table_constraints.get(
             f"{table.schema}.{table.name}", []
         )
         conf_constraints_sql: List[SQLWhereClause] = []
         for conf_constraint in conf_constraints:
             if conf_constraint.column in table.columns:
-                conf_constraints.append(
+                conf_constraints_sql.append(
                     SQLWhereClauseOperator(
+                        type_="operator",
                         operator=conf_constraint.operator,
                         columns=[conf_constraint.column],
-                        values=conf_contraint.values,
+                        values=conf_constraint.values,
                     )
                 )
 
@@ -325,7 +330,7 @@ class Planner:
                 where=SQLWhereClauseAnd(
                     type_="and",
                     conditions=[
-                        *conf_constraints,
+                        *conf_constraints_sql,
                         SQLWhereClauseOr(
                             type_="or",
                             conditions=fk_constraints,
@@ -339,31 +344,45 @@ class Planner:
         if target:
             target_constraints: List[SQLWhereClause] = []
             if target.percent is not None:
-                target_constraints.append(SQLWhereRandomFilter(target.percent / 100.0))
+                target_constraints.append(
+                    SQLWhereClauseRandom(
+                        type_="random", threshold=target.percent / 100.0
+                    )
+                )
 
             if target.sql is not None:
-                target_constraints.append(SQLWhereClauseSQL(target.sql))
+                target_constraints.append(
+                    SQLWhereClauseSQL(
+                        type_="sql",
+                        sql=target.sql,
+                    )
+                )
 
             for column, patterns in target.like.items():
                 target_constraints.append(
                     SQLWhereClauseOr(
+                        type_="or",
                         conditions=[
                             SQLWhereClauseOperator(
+                                type_="operator",
                                 operator="like",
                                 columns=[column],
                                 values=pattern,
                             )
                             for pattern in patterns
-                        ]
+                        ],
                     )
                 )
 
             for column, in_list in target.in_.items():
-                param_name = f"param_{len(params)}"
                 target_constraints.append(
-                    f"{mysql_identifier(column)} IN :{param_name}"
+                    SQLWhereClauseOperator(
+                        type_="operator",
+                        operator="in",
+                        columns=[column],
+                        values=in_list,
+                    )
                 )
-                params[param_name] = list(in_list)
 
             if target.all_:
                 target_constraints.clear()

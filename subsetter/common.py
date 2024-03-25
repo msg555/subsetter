@@ -1,14 +1,17 @@
 import logging
 import os
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import sqlalchemy as sa
-from pydantic import BaseModel, Field
-from pydantic.typing import Annotated
+from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import Annotated
 
 from subsetter.sql_dialects import DatabaseDialect, SQLDialectEncoder
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_DIALECT: Literal["mysql"] = "mysql"
+
+# pylint: disable=unused-argument
 
 
 def parse_table_name(full_table_name: str) -> Tuple[str, str]:
@@ -29,7 +32,7 @@ def database_url(
     password: Optional[str] = None,
 ) -> sa.engine.URL:
     if env_prefix is not None:
-        dialect = dialect or os.getenv(f"{env_prefix}DIALECT", None)
+        dialect = dialect or os.getenv(f"{env_prefix}DIALECT", None)  # type: ignore
         host = host or os.getenv(f"{env_prefix}HOST", "localhost")
         port = port or int(os.getenv(f"{env_prefix}PORT", "0"))
         database = database or os.getenv(f"{env_prefix}DATABASE", "")
@@ -37,10 +40,10 @@ def database_url(
         password = os.environ[f"{env_prefix}PASSWORD"] if password is None else password
 
     if dialect is None:
-        dialect = "mysql"
-        LOGGER.warning("No database dialect selected, defaulting to 'mysql'")
+        dialect = DEFAULT_DIALECT
+        LOGGER.warning("No database dialect selected, defaulting to '%s'", dialect)
 
-    extra_kwargs = {}
+    extra_kwargs: Dict[str, Any] = {}
     if dialect == "mysql":
         drivername = "mysql+pymysql"
         if not port:
@@ -124,9 +127,11 @@ def _set_param(params_out: Dict[str, Any], param: Any) -> str:
 
 
 class SQLTableIdentifier(BaseModel):
-    table_schema: str = Field(..., serialization_alias="schema")
-    table_name: str = Field(..., serialization_alias="table")
+    table_schema: str = Field(..., alias="schema")
+    table_name: str = Field(..., alias="table")
     sampled: bool = False
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         return sql_enc.table_name(
@@ -139,7 +144,9 @@ SQLLiteralType = Union[str, int, float]
 
 
 class SQLWhereClauseFalse(BaseModel):
-    type_: Literal["false"]
+    type_: Literal["false"] = Field(..., alias="type")
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         return "0=1"
@@ -149,7 +156,9 @@ class SQLWhereClauseFalse(BaseModel):
 
 
 class SQLWhereClauseTrue(BaseModel):
-    type_: Literal["true"]
+    type_: Literal["true"] = Field(..., alias="type")
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         return "1=1"
@@ -159,10 +168,12 @@ class SQLWhereClauseTrue(BaseModel):
 
 
 class SQLWhereClauseOperator(BaseModel):
-    type_: Literal["operator"] = Field(..., serialization_alias="type")
+    type_: Literal["operator"] = Field(..., alias="type")
     operator: SQLKnownOperator = "="
     columns: List[str]
     values: Union[SQLLiteralType, List[SQLLiteralType], "SQLStatement"]
+
+    model_config = ConfigDict(populate_by_name=True)
 
     # TODO: Validate that columns is non empty
     # TODO: Validate that cardinalities match
@@ -182,8 +193,10 @@ class SQLWhereClauseOperator(BaseModel):
 
 
 class SQLWhereClauseAnd(BaseModel):
-    type_: Literal["and"] = Field(..., serialization_alias="type")
+    type_: Literal["and"] = Field(..., alias="type")
     conditions: List["SQLWhereClause"]
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         if not self.conditions:
@@ -191,7 +204,7 @@ class SQLWhereClauseAnd(BaseModel):
         return " AND ".join(cond.build(sql_enc, params_out) for cond in self.conditions)
 
     def simplify(self) -> "SQLWhereClause":
-        simp_conditions = [
+        simp_conditions: List["SQLWhereClause"] = [
             simp_condition
             for condition in self.conditions
             if not isinstance(
@@ -210,8 +223,10 @@ class SQLWhereClauseAnd(BaseModel):
 
 
 class SQLWhereClauseOr(BaseModel):
-    type_: Literal["or"] = Field(..., serialization_alias="type")
+    type_: Literal["or"] = Field(..., alias="type")
     conditions: List["SQLWhereClause"]
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         if not self.conditions:
@@ -219,7 +234,7 @@ class SQLWhereClauseOr(BaseModel):
         return " OR ".join(cond.build(sql_enc, params_out) for cond in self.conditions)
 
     def simplify(self) -> "SQLWhereClause":
-        simp_conditions = [
+        simp_conditions: List["SQLWhereClause"] = [
             simp_condition
             for condition in self.conditions
             if not isinstance(
@@ -238,8 +253,10 @@ class SQLWhereClauseOr(BaseModel):
 
 
 class SQLWhereClauseRandom(BaseModel):
-    type_: Literal["random"] = Field(..., serialization_alias="type")
+    type_: Literal["random"] = Field(..., alias="type")
     threshold: float
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         return f"{sql_enc.random()} < {_set_param(params_out, self.threshold)}"
@@ -249,8 +266,10 @@ class SQLWhereClauseRandom(BaseModel):
 
 
 class SQLWhereClauseSQL(BaseModel):
-    type_: Literal["sql"] = Field(..., serialization_alias="type")
+    type_: Literal["sql"] = Field(..., alias="type")
     sql: str
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         return f"({self.sql})"
@@ -274,11 +293,13 @@ SQLWhereClause = Annotated[
 
 
 class SQLStatementSelect(BaseModel):
-    type_: Literal["select"] = Field(..., serialization_alias="type")
-    columns: List[str] = None
-    from_: SQLTableIdentifier = Field(..., serialization_alias="from")
+    type_: Literal["select"] = Field(..., alias="type")
+    columns: Optional[List[str]] = None
+    from_: SQLTableIdentifier = Field(..., alias="from")
     where: Optional[SQLWhereClause] = None
     limit: Optional[int] = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         result = ["SELECT "]
@@ -313,12 +334,14 @@ class SQLStatementSelect(BaseModel):
             kwargs["columns"] = self.columns
         if self.limit is not None:
             kwargs["limit"] = self.limit
-        return SQLStatementSelect(**kwargs)
+        return SQLStatementSelect(**kwargs)  # type: ignore
 
 
 class SQLStatementUnion(BaseModel):
-    type_: Literal["union"] = Field(..., serialization_alias="type", exclude=False)
+    type_: Literal["union"] = Field(..., alias="type")
     statements: List[SQLStatementSelect]
+
+    model_config = ConfigDict(populate_by_name=True)
     # TODO: Assert statements is not empty
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
@@ -356,7 +379,10 @@ class SQLStatementUnion(BaseModel):
                 columns=statement0.columns,
                 where=SQLWhereClauseOr(
                     type_="or",
-                    conditions=[statement.where for statement in simp_statements],
+                    conditions=[
+                        (statement.where or SQLWhereClauseTrue(type_="true"))
+                        for statement in simp_statements
+                    ],
                 ),
             ).simplify()
 
@@ -381,13 +407,9 @@ class SQLTableQuery(BaseModel):
 
     def build(self, sql_enc: SQLDialectEncoder, params_out: Dict[str, Any]) -> str:
         if self.sql is not None:
-            params_out.update(self.sql_params)
+            if self.sql_params:
+                params_out.update(self.sql_params)
             return self.sql
         if self.statement is not None:
             return self.statement.build(sql_enc, params_out)
         raise ValueError("One of 'sql' or 'select' must be set")
-
-
-SQLWhereClauseOr.update_forward_refs()
-SQLWhereClauseAnd.update_forward_refs()
-SQLWhereClauseOperator.update_forward_refs()
