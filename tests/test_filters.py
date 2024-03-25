@@ -66,7 +66,7 @@ def _column_filter_test(
         "columns": columns,
         **(config_extra or {}),
     }
-    filt = filter_cls.Config.parse_obj(config_dict).construct_filter(
+    filt = filter_cls.Config.model_validate(config_dict).construct_filter(
         columns, filter_context=filter_context
     )
     values_out = filt.filter_view(values_in)

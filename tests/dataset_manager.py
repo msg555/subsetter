@@ -1,18 +1,21 @@
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 import sqlalchemy as sa
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
-from subsetter.common import (
-    DatabaseConfig,
-    mysql_identifier,
-    mysql_table_name,
-    parse_table_name,
-)
+from subsetter.common import DEFAULT_DIALECT, DatabaseConfig, parse_table_name
+from subsetter.sql_dialects import SQLDialectEncoder
 
 DATASETS_BASE_PATH = os.path.join(os.path.dirname(__file__), "datasets")
+
+
+class ColumnDescriptor(BaseModel):
+    name: str
+    type_: str = Field("int", alias="type")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class TestDataset(BaseModel):
@@ -22,70 +25,79 @@ class TestDataset(BaseModel):
             dst_table: str
             dst_columns: List[str]
 
-        columns: List[str]
+        columns: List[Union[str, ColumnDescriptor]]
         primary_key: List[str] = []
         foreign_keys: List[ForeignKeyDescriptor] = []
 
-    databases: List[str]
+        def make_table(self, metadata: sa.MetaData, schema: str, name: str) -> sa.Table:
+            table = sa.Table(
+                name,
+                metadata,
+                schema=schema,
+                *(_col_spec(col) for col in self.columns),
+            )
+            if self.primary_key:
+                table.append_constraint(sa.PrimaryKeyConstraint(*self.primary_key))
+            for fk in self.foreign_keys:
+                table.append_constraint(
+                    sa.ForeignKeyConstraint(
+                        fk.columns,
+                        [f"{fk.dst_table}.{ref_col}" for ref_col in fk.dst_columns],
+                    )
+                )
+            return table
+
     tables: Dict[str, TableDescriptor]
     data: Dict[str, List[List[Any]]]
 
 
+def _col_spec(col: Union[str, ColumnDescriptor]) -> sa.Column:
+    if isinstance(col, ColumnDescriptor):
+        col_desc = col
+    else:
+        col_parts = col.split("|", 1)
+        col_desc = ColumnDescriptor(
+            name=col_parts[0],
+            type_=col_parts[1] if len(col_parts) > 1 else "int",
+        )
+    if col_desc.type_ == "str":
+        return sa.Column(col_desc.name, sa.Text)
+    if col_desc.type_ == "int":
+        return sa.Column(col_desc.name, sa.Integer)
+    raise ValueError(f"Unknown type {col_desc.type_}")
+
+
 def apply_dataset(db_config: DatabaseConfig, name: str) -> None:
+    dialect = db_config.dialect or DEFAULT_DIALECT
+    sql_enc = SQLDialectEncoder.from_dialect(dialect)
+
     dataset_path = os.path.join(DATASETS_BASE_PATH, f"{name}.yaml")
     with open(dataset_path, "r", encoding="utf-8") as fdataset:
-        config = TestDataset.parse_obj(yaml.safe_load(fdataset))
+        config = TestDataset.model_validate(yaml.safe_load(fdataset))
     engine = sa.create_engine(db_config.database_url())
 
-    def _col_spec(column: str) -> str:
-        col_parts = column.split("|", 1)
-        col_name = col_parts[0]
-        col_type = col_parts[1] if len(col_parts) > 1 else "int"
-        mysql_type: str
-        if col_type == "str":
-            mysql_type = "TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin"
-        elif col_type == "int":
-            mysql_type = "int(11)"
-        else:
-            assert f"Unknown type {mysql_type}"
-        return f"{mysql_identifier(col_name)} {mysql_type}"
+    schemas = set()
+    metadata = sa.MetaData()
+    for table, table_config in config.tables.items():
+        schema, table_name = parse_table_name(table)
+        table_config.make_table(metadata, schema, table_name)
+        schemas.add(schema)
 
     with engine.connect() as conn:
-        for database in config.databases:
-            conn.execute(
-                sa.text(f"DROP DATABASE IF EXISTS {mysql_identifier(database)}")
-            )
-            conn.execute(sa.text(f"CREATE DATABASE {mysql_identifier(database)}"))
-        for table, table_config in config.tables.items():
-            schema, table_name = parse_table_name(table)
-            col_specs = [_col_spec(column) for column in table_config.columns]
-            if table_config.primary_key:
-                col_specs.append(
-                    "PRIMARY KEY ("
-                    + ",".join(
-                        mysql_identifier(colname)
-                        for colname in table_config.primary_key
-                    )
-                    + ")"
+        if db_config.dialect == "mysql":
+            for schema in schemas:
+                conn.execute(
+                    sa.text(f"DROP DATABASE IF EXISTS {sql_enc.identifier(schema)}")
                 )
-            for foreign_key in table_config.foreign_keys:
-                dst_schema, dst_table_name = parse_table_name(foreign_key.dst_table)
-                col_specs.append(
-                    "FOREIGN KEY ("
-                    + ",".join(
-                        mysql_identifier(colname) for colname in foreign_key.columns
+                conn.execute(sa.text(f"CREATE DATABASE {sql_enc.identifier(schema)}"))
+        if db_config.dialect == "postgres":
+            for schema in schemas:
+                conn.execute(
+                    sa.text(
+                        f"DROP SCHEMA IF EXISTS {sql_enc.identifier(schema)} CASCADE"
                     )
-                    + f") REFERENCES {mysql_table_name(dst_schema, dst_table_name)}("
-                    + ",".join(
-                        mysql_identifier(colname) for colname in foreign_key.dst_columns
-                    )
-                    + ")"
                 )
-
-            create_sql = (
-                f"CREATE TABLE {mysql_table_name(schema, table_name)} ("
-                + ", ".join(col_specs)
-                + ")"
-            )
-            conn.execute(sa.text(create_sql))
+                conn.execute(sa.text(f"CREATE SCHEMA {sql_enc.identifier(schema)}"))
         conn.commit()
+
+    metadata.create_all(engine)

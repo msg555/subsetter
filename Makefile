@@ -23,7 +23,7 @@ lint: format-check mypy pylint
 
 .PHONY: test
 test:
-	$(PYTHON) -m pytest -sv tests/ -m 'not mysql_live'
+	$(PYTHON) -m pytest -sv tests/ -m 'not mysql_live and not postgres_live'
 
 .PHONY: test_all
 test_all:

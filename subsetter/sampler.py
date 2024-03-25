@@ -6,12 +6,12 @@ from typing import Any, Dict, List, Literal, Optional, Set, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
-from pydantic.typing import Annotated
+from typing_extensions import Annotated
 
 from subsetter.common import (
+    DEFAULT_DIALECT,
     DatabaseConfig,
-    mysql_column_list,
-    mysql_table_name,
+    SQLDialectEncoder,
     parse_table_name,
 )
 from subsetter.filters import FilterConfig, FilterView, FilterViewChain
@@ -27,16 +27,8 @@ except ImportError:
 
 
 LOGGER = logging.getLogger(__name__)
-
-# Name suffix to give to our temporary tables
-TMP_SUFFIX = "_tmp_subsetter_"
-
 SOURCE_BUFFER_SIZE = 1024
 DESTINATION_BUFFER_SIZE = 1024
-
-
-def _mangle_query(query: str) -> str:
-    return query.replace("<SAMPLED>", TMP_SUFFIX)
 
 
 def _multiply_column(
@@ -60,12 +52,12 @@ class MultiplicityConfig(BaseModel):
     ignore_primary_key_columns: Dict[str, List[str]] = {}
 
 
-class MysqlOutputConfig(DatabaseConfig):
-    mode: Literal["mysql"]
+class DatabaseOutputConfig(DatabaseConfig):
+    mode: Literal["database"]
 
 
 OutputType = Annotated[
-    Union[DirectoryOutputConfig, MysqlOutputConfig],
+    Union[DirectoryOutputConfig, DatabaseOutputConfig],
     Field(..., discriminator="mode"),
 ]
 
@@ -105,8 +97,8 @@ class SamplerOutput(abc.ABC):
     def from_config(config: Any) -> "SamplerOutput":
         if isinstance(config, DirectoryOutputConfig):
             return DirectoryOutput(config)
-        if isinstance(config, MysqlOutputConfig):
-            return MysqlOutput(config)
+        if isinstance(config, DatabaseOutputConfig):
+            return DatabaseOutput(config)
         raise RuntimeError("Unknown config type")
 
 
@@ -145,15 +137,18 @@ class DirectoryOutput(SamplerOutput):
                     fdump.write("\n")
 
 
-class MysqlOutput(SamplerOutput):
-    def __init__(self, config: MysqlOutputConfig) -> None:
+class DatabaseOutput(SamplerOutput):
+    def __init__(self, config: DatabaseOutputConfig) -> None:
+        self.sql_enc = SQLDialectEncoder.from_dialect(config.dialect or DEFAULT_DIALECT)
         self.engine = config.database_engine(env_prefix="SUBSET_DESTINATION_")
 
     def truncate(self, schema: str, table_name: str) -> None:
         LOGGER.info("Truncating table %s.%s", schema, table_name)
         with self.engine.connect() as conn:
             conn.execute(
-                sa.text(f"DELETE FROM {mysql_table_name(schema, table_name)} WHERE 1")
+                sa.text(
+                    f"DELETE FROM {self.sql_enc.table_name(schema, table_name)} WHERE 1=1"
+                )
             )
             conn.commit()
 
@@ -194,8 +189,8 @@ class MysqlOutput(SamplerOutput):
             if col_name in (column_multipliers or set())
         ]
         insert_query = (
-            f"INSERT INTO {mysql_table_name(schema, table_name)} "
-            f"({mysql_column_list(columns_out)}) VALUES "
+            f"INSERT INTO {self.sql_enc.table_name(schema, table_name)} "
+            f"({self.sql_enc.column_list(columns_out)}) VALUES "
         )
         buffer: List[tuple] = []
 
@@ -229,6 +224,9 @@ class Sampler:
         self.source_engine = self.config.source.database_engine(
             env_prefix="SUBSET_SOURCE_"
         )
+        self.sql_enc = SQLDialectEncoder.from_dialect(
+            self.config.source.dialect or DEFAULT_DIALECT
+        )
         self.output = SamplerOutput.from_config(config.output)
 
     def sample(self, plan: SubsetPlan, *, truncate: bool = False) -> None:
@@ -244,10 +242,7 @@ class Sampler:
 
         if truncate:
             self._truncate(insert_order)
-        with self.source_engine.execution_options(
-            stream_results=True,
-            yield_per=SOURCE_BUFFER_SIZE,
-        ).connect() as conn:
+        with self.source_engine.execution_options().connect() as conn:
             self._materialize_tables(conn, plan)
             self._copy_results(conn, plan, insert_order, table_column_multipliers)
 
@@ -263,13 +258,16 @@ class Sampler:
             schema, table_name = parse_table_name(table)
 
             LOGGER.info("Materializing sample for %s", table)
+
+            params: Dict[str, Any] = {}
+            sample_sql = query.build(self.sql_enc, params)
+
             try:
                 result = conn.execute(
                     sa.text(
-                        f"CREATE TEMPORARY TABLE {mysql_table_name(schema, table_name + TMP_SUFFIX)} "
-                        + _mangle_query(query.query)
+                        self.sql_enc.make_temp_table(schema, table_name, sample_sql)
                     ),
-                    query.params,
+                    params,
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 # Some client/server combinations report a read-only error even though the temporary
@@ -301,17 +299,17 @@ class Sampler:
 
             LOGGER.info("Sampling %s.%s ...", schema, table_name)
 
+            params: Dict[str, Any] = {}
             if query.materialize:
-                result = conn.execution_options(yield_per=SOURCE_BUFFER_SIZE).execute(
-                    sa.text(
-                        f"SELECT * FROM {mysql_table_name(schema, table_name + TMP_SUFFIX)}"
-                    )
-                )
+                query_sql = f"SELECT * FROM {self.sql_enc.table_name(schema, table_name, sampled=True)}"
             else:
-                result = conn.execution_options(yield_per=SOURCE_BUFFER_SIZE).execute(
-                    sa.text(_mangle_query(query.query)),
-                    query.params,
-                )
+                query_sql = query.build(self.sql_enc, params)
+
+            LOGGER.info("Sampling with query %r", query_sql)
+            result = conn.execution_options(
+                stream_results=True,
+                yield_per=SOURCE_BUFFER_SIZE,
+            ).execute(sa.text(query_sql), params)
             columns = result.keys()
 
             filter_view = FilterViewChain.construct_filter(

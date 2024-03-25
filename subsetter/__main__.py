@@ -2,15 +2,15 @@ import contextlib
 import logging
 import sys
 from argparse import ArgumentParser
-from typing import Optional
+from typing import Optional, get_args
 
 import yaml
 
-from subsetter.common import DatabaseConfig
+from subsetter.common import DatabaseConfig, DatabaseDialect
 from subsetter.planner import Planner, PlannerConfig, SubsetPlan
 from subsetter.sampler import (
+    DatabaseOutputConfig,
     DirectoryOutputConfig,
-    MysqlOutputConfig,
     Sampler,
     SamplerConfig,
 )
@@ -104,9 +104,18 @@ def _parse_args():
         action="count",
         default=0,
     )
+    parser.add_argument(
+        "--src-dialect",
+        default=None,
+        choices=get_args(DatabaseDialect),
+        help="source database dialect",
+    )
     parser.add_argument("--src-host", default=None, help="source database host")
     parser.add_argument(
         "--src-port", type=int, default=None, help="source database port"
+    )
+    parser.add_argument(
+        "--src-database", default=None, help="source database to connect to"
     )
     parser.add_argument("--src-user", default=None, help="source database user")
     parser.add_argument("--src-password", default=None, help="source database password")
@@ -132,8 +141,10 @@ def _get_source_database_config(
 ) -> DatabaseConfig:
     overlay = overlay or DatabaseConfig()
     return DatabaseConfig(
+        dialect=args.src_dialect or overlay.dialect,
         host=args.src_host or overlay.host,
         port=args.src_port or overlay.port,
+        database=args.src_database or overlay.database,
         username=args.src_user or overlay.username,
         password=args.src_password or overlay.password,
     )
@@ -151,8 +162,8 @@ def _get_sample_config(args) -> SamplerConfig:
         if args.output == "mysql":
             return SamplerConfig(
                 source=_get_source_database_config(args),
-                output=MysqlOutputConfig(
-                    mode="mysql",
+                output=DatabaseOutputConfig(
+                    mode="database",
                     host=args.dst_host,
                     port=args.dst_port,
                     username=args.dst_user,
@@ -171,7 +182,7 @@ def _get_sample_config(args) -> SamplerConfig:
 
     try:
         with _open_config_path(args.sample_config) as fconfig:
-            config = SamplerConfig.parse_obj(yaml.safe_load(fconfig))
+            config = SamplerConfig.model_validate(yaml.safe_load(fconfig))
     except ValueError as exc:
         LOGGER.error(
             "Unexpected sampler config file format: %s",
@@ -195,7 +206,7 @@ def _get_sample_config(args) -> SamplerConfig:
 def _get_plan_config(args) -> PlannerConfig:
     try:
         with _open_config_path(args.plan_config) as fconfig:
-            return PlannerConfig.parse_obj(yaml.safe_load(fconfig))
+            return PlannerConfig.model_validate(yaml.safe_load(fconfig))
     except ValueError as exc:
         LOGGER.error(
             "Unexpected plan file format: %s",
@@ -223,7 +234,7 @@ def _main_plan(args):
             ctx = open(args.plan_output, "w", encoding="utf-8")
         with ctx as fplan:
             yaml.dump(
-                plan.dict(exclude_defaults=True),
+                plan.dict(exclude_unset=True, by_alias=True),
                 stream=fplan,
                 default_flow_style=False,
                 width=2**20,
@@ -239,7 +250,7 @@ def _main_plan(args):
 def _main_sample(args):
     try:
         with _open_config_path(args.plan) as fplan:
-            plan = SubsetPlan.parse_obj(yaml.safe_load(fplan))
+            plan = SubsetPlan.model_validate(yaml.safe_load(fplan))
     except ValueError as exc:
         LOGGER.error(
             "Unexpected plan file format: %s",
@@ -290,7 +301,8 @@ def main():
                 raise RuntimeError("Unknown action")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.error(
-                "Unexpected error: %s",
+                "Unexpected error %s: %s",
+                type(exc).__name__,
                 exc,
                 exc_info=args.verbose > 1,
             )

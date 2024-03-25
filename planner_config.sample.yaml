@@ -3,8 +3,12 @@
 source:
   host: my-database # overridden by SUBSET_SOURCE_HOST
   port: 3306 # overridden by SUBSET_SOURCE_PORT
+  dialect: mysql  # overridden by SUBSET_SOURCE_DIALECT, supports mysql, postgres
   username: my_user # overridden by SUBSET_SOURCE_USERNAME
   password: my_s3cret # overridden by SUBSET_SOURCE_PASSWORD
+
+  # For engines where it applies specify database name to connect to as well.
+  # database: my_dbname # overridden by SUBSET_SOURCE_DATABASE
 
 # Targets define where to start your sampling. Any additional rows brought in
 # for any tables will be done just by following foreign keys (except for
