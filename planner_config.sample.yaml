@@ -1,6 +1,7 @@
 # Optionally specify the source database. This can also be passed on the command
 # line or through environment variables. 
 source:
+  dialect: mysql # overridden by SUBSET_SOURCE_DIALECT (mysql or postgres)
   host: my-database # overridden by SUBSET_SOURCE_HOST
   port: 3306 # overridden by SUBSET_SOURCE_PORT
   dialect: mysql  # overridden by SUBSET_SOURCE_DIALECT, supports mysql, postgres
@@ -78,8 +79,17 @@ extra_fks:
   dst_table: db1.users
   dst_columns: [id]
 
-# If set to true subsetter will automatically attempt to infer foreign keys
+# If set to true the subsetter will automatically attempt to infer foreign keys
 # within a single database. It does this by inferring that a column name that
 # matches the name of a primary key column (that is unique within the database)
 # should function as a foreign key to that table.
 infer_foreign_keys: false
+
+# If set to true the subsetter will automatically attempt to normalize some
+# foreign key relationships. In particular if there are foreign key
+# relationships A->B, A->C, B->C then the subsetter will assume that the
+# relationship A->C is redundant and ignore it. Without this assumption this
+# sort of relationship triangle cannot be sampled with a "one table, one query"
+# strategy. Note that this does not currently attempt to normalize chains that
+# involve more than three tables.
+normalize_foreign_keys: false

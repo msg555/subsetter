@@ -49,6 +49,13 @@ def _add_plan_args(parser, *, subset_action: bool = False):
             help="Output path for plan, writes to stdout by default",
             dest="plan_output",
         )
+        parser.add_argument(
+            "--sql",
+            default=False,
+            const=True,
+            action="store_const",
+            help="Write raw SQL queries in plan instead of syntax tree form",
+        )
 
 
 def _add_sample_args(parser, *, subset_action: bool = False):
@@ -227,7 +234,7 @@ def _get_plan_config(args) -> PlannerConfig:
 def _main_plan(args):
     config = _get_plan_config(args)
     config.source = _get_source_database_config(args, overlay=config.source)
-    plan = Planner(config).plan()
+    plan = Planner(config).plan(output_sql=args.sql)
     try:
         ctx = contextlib.nullcontext(sys.stdout)
         if args.plan_output:

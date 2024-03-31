@@ -5,29 +5,43 @@ mysql databases. _Subsetting_ is the action extracting a smaller set of rows
 from your database that still maintain expected foreign-key relationships
 between your data. This can be useful for testing against a small but
 realistic dataset or for generating sample data for use in demonstrations.
-This tool also supports filtering that allows you to remove/randomize rows that
+This tool also supports filtering that allows you to remove/anonymize rows that
 may contain sensitive data.
 
 Similar tools include Tonic.ai's platform and [condenser](https://github.com/TonicAI/condenser).
 This is meant to be a simple CLI tool that overcomes many of the difficulties in
-using `condenser`.
+using `condenser.
+
+## Limitations
 
 Be aware that subsetting is a hard problem. The planner tool is meant to do a
 bit of "magic" to generate a plan. For some organizations this will entirely
-match their needs, for others this may only be a starting point. The plan
-produced can be fairly aribtrarily modified and then fed to the sampler which
-does the technical work of actually extracting data from the source.
+match their needs, for others this may only be a starting point. For this reason
+the subsetter splits its function into a "planning" phase and a "sampling"
+phase. The output of the planning phase can be examined and modified and fed
+into the sampling phase which is responsible for the mechanics of filtering
+and loading data into the destination.
+
+Additionally the subsetter tool takes an approach of "one table, one query". This
+means that the subsetter will sample each table using a single query that can
+optionally reference some previously sampled rows from other tables. In
+particular, this tool cannot generically sample a transitive closure of foreign
+key relationships if schemas contain relationship cycles that aren't innately
+closed.
 
 # Usage
 
 ## Create a sampling plan
 
 The first step in subsetting a database is to generate a sampling plan. A
-sampling plan is nothing more than an ordered sequence of SQL describing how
+sampling plan defines the query that will be used to sample each table
+
+is nothing more than an ordered sequence of SQL describing how
 to sample each requested database table. You'll want to create a configuration
 file similar to [planner_config.sample.yaml](planner_config.sample.yaml) that
-tells the planner what tables you want to sample. Then you can create a plan
-with the below command:
+tells the planner what tables you want to sample along with any additional
+constraints that should be considered. Then you can create a plan with the
+below command:
 
 ```sh
 python -m subsetter plan -c my-config.yaml > plan.yaml

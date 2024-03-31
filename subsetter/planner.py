@@ -78,7 +78,7 @@ class Planner:
             parse_table_name(table) for table in config.passthrough
         }
 
-    def plan(self) -> SubsetPlan:
+    def plan(self, output_sql: bool = False) -> SubsetPlan:
         LOGGER.info("Scanning schema")
         meta, extra_tables = DatabaseMetadata.from_engine(
             self.engine,
@@ -135,7 +135,7 @@ class Planner:
                 target=self.config.targets.get(table),
             )
 
-        if self.config.output_sql:
+        if output_sql:
             for table, query in queries.items():
                 if not query.statement:
                     continue
