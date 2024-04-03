@@ -291,7 +291,13 @@ class DatabaseMetadata:
                 if (fk.dst_schema, fk.dst_table, fk.dst_columns) not in child_fk_sets:
                     fk_out.append(fk)
                 else:
-                    LOGGER.info("Normalizing foreign key %s", fk)
+                    LOGGER.info(
+                        "Normalizing foreign key, removed %s->%s.%s on %r",
+                        table,
+                        fk.dst_schema,
+                        fk.dst_table,
+                        fk.columns,
+                    )
             table.foreign_keys = fk_out
 
     def toposort(self) -> List[TableMetadata]:

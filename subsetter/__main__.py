@@ -82,14 +82,15 @@ def _add_sample_args(parser, *, subset_action: bool = False):
         help="Truncate existing output before sampling",
     )
     output_parsers = parser.add_subparsers(
-        required=False,
         dest="output",
+        required=False,
         help="Configure sampling output destination",
     )
 
     mysql_parser = output_parsers.add_parser(
-        "mysql", help="Write sampled data to a mysql database"
+        "database", help="Write sampled data to a database"
     )
+    mysql_parser.add_argument("--dialect", default=None, dest="dst_dialect")
     mysql_parser.add_argument("--host", default=None, dest="dst_host")
     mysql_parser.add_argument("--port", type=int, default=None, dest="dst_port")
     mysql_parser.add_argument("--user", default=None, dest="dst_user")
@@ -166,11 +167,12 @@ def _get_sample_config(args) -> SamplerConfig:
         sys.exit(1)
 
     if args.output:
-        if args.output == "mysql":
+        if args.output == "database":
             return SamplerConfig(
                 source=_get_source_database_config(args),
                 output=DatabaseOutputConfig(
                     mode="database",
+                    dialect=args.dst_dialect,
                     host=args.dst_host,
                     port=args.dst_port,
                     username=args.dst_user,

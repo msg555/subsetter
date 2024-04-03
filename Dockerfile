@@ -5,7 +5,7 @@ RUN pip install -U pip tqdm
 WORKDIR /subsetter
 
 COPY . ./
-RUN python3 -m pip install -e .
+RUN python3 -m pip install -e .[mysql,postgres]
 
 RUN adduser -S ctruser
 

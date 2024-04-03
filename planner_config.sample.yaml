@@ -53,7 +53,7 @@ table_constraints:
   db1.user-data:
   - column: action_date
     operator: '>'
-    expression: '2023-07-01'
+    value: '2023-07-01'
 
 # Passthrough tables will be copied in full. Passthrough tables must not have
 # foreign keys pointing to non-passthrough tables. The planner will make no

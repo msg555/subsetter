@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pydantic import BaseModel, Field
@@ -49,7 +50,7 @@ class PlannerConfig(BaseModel):
     class ColumnConstraint(BaseModel):
         column: str
         operator: SQLKnownOperator
-        values: Union[SQLLiteralType, List[SQLLiteralType]]
+        value: Union[SQLLiteralType, List[SQLLiteralType]]
 
     source: DatabaseConfig = DatabaseConfig()
     table_constraints: Dict[str, List[ColumnConstraint]] = {}
@@ -72,6 +73,11 @@ class Planner:
     def __init__(self, config: PlannerConfig) -> None:
         self.config = config
         self.engine = self.config.source.database_engine(env_prefix="SUBSET_SOURCE_")
+        self.sql_enc = SQLDialectEncoder.from_dialect(
+            self.config.source.dialect
+            or os.getenv("SUBSET_SOURCE_DIALECT", "")  # type: ignore
+            or DEFAULT_DIALECT
+        )
         self.meta: DatabaseMetadata
         self.ignore_tables = {parse_table_name(table) for table in config.ignore}
         self.passthrough_tables = {
@@ -141,12 +147,7 @@ class Planner:
                     continue
                 sql_params: Dict[str, Any] = {}
                 queries[table] = SQLTableQuery(
-                    sql=query.statement.build(
-                        SQLDialectEncoder.from_dialect(
-                            self.config.source.dialect or DEFAULT_DIALECT
-                        ),
-                        sql_params,
-                    ),
+                    sql=query.statement.build(self.sql_enc, sql_params),
                     sql_params=sql_params,
                     materialize=query.materialize,
                 )
@@ -315,7 +316,7 @@ class Planner:
                         type_="operator",
                         operator=conf_constraint.operator,
                         columns=[conf_constraint.column],
-                        values=conf_constraint.values,
+                        values=conf_constraint.value,
                     )
                 )
 

@@ -139,8 +139,10 @@ class DirectoryOutput(SamplerOutput):
 
 class DatabaseOutput(SamplerOutput):
     def __init__(self, config: DatabaseOutputConfig) -> None:
-        self.sql_enc = SQLDialectEncoder.from_dialect(config.dialect or DEFAULT_DIALECT)
         self.engine = config.database_engine(env_prefix="SUBSET_DESTINATION_")
+        self.sql_enc = SQLDialectEncoder.from_dialect(
+            config.dialect or os.getenv("SUBSET_DESTINATION_DIALECT") or DEFAULT_DIALECT
+        )
 
     def truncate(self, schema: str, table_name: str) -> None:
         LOGGER.info("Truncating table %s.%s", schema, table_name)
@@ -225,7 +227,9 @@ class Sampler:
             env_prefix="SUBSET_SOURCE_"
         )
         self.sql_enc = SQLDialectEncoder.from_dialect(
-            self.config.source.dialect or DEFAULT_DIALECT
+            self.config.source.dialect  # type: ignore
+            or os.getenv("SUBSET_SOURCE_DIALECT")
+            or DEFAULT_DIALECT
         )
         self.output = SamplerOutput.from_config(config.output)
 
