@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
@@ -145,6 +145,7 @@ class DatabaseOutput(SamplerOutput):
             config.dialect or os.getenv("SUBSET_DESTINATION_DIALECT") or DEFAULT_DIALECT  # type: ignore
         )
         self.remap = config.remap
+        self.table_bind_processors: Dict[str, Dict[str, Callable[[Any], Any]]] = {}
 
     def _remap_table(self, schema: str, table_name: str) -> Tuple[str, str]:
         table = f"{schema}.{table_name}"
@@ -167,10 +168,19 @@ class DatabaseOutput(SamplerOutput):
             close_backward=truncate,
         )
         for table in table_remap:
-            if parse_table_name(table) not in meta.tables:
+            table_meta = meta.tables.get(parse_table_name(table))
+            if table_meta is None:
                 LOGGER.warning(
                     "Database does not have table %s, will not sample", table
                 )
+            else:
+                bind_processors = {}
+                for col_name, col_data in table_meta.columns.items():
+                    if bind_processor := col_data.type_.bind_processor(
+                        self.engine.dialect
+                    ):
+                        bind_processors[col_name] = bind_processor
+                self.table_bind_processors[table] = bind_processors
         for schema, table_name in additional_tables:
             LOGGER.info(
                 "Found additional unsampled table %s.%s to truncate",
@@ -210,6 +220,7 @@ class DatabaseOutput(SamplerOutput):
         column_multipliers: Optional[Set[str]] = None,
     ) -> None:
         columns_out = filter_view.columns_out if filter_view else columns
+        column_index = {col_name: index for index, col_name in enumerate(columns_out)}
         multiplied_indexes = [
             ind
             for ind, col_name in enumerate(columns_out)
@@ -221,6 +232,13 @@ class DatabaseOutput(SamplerOutput):
             f"({self.sql_enc.column_list(columns_out)}) VALUES "
         )
         buffer: List[tuple] = []
+        bind_processors = [
+            (ind, bind_processor)
+            for col_name, bind_processor in self.table_bind_processors.get(
+                f"{schema}.{table_name}", {}
+            ).items()
+            if (ind := column_index.get(col_name)) is not None
+        ]
 
         def _flush_buffer():
             query = f"{insert_query}{','.join(f':{ind}' for ind in range(len(buffer)))}"
@@ -239,6 +257,8 @@ class DatabaseOutput(SamplerOutput):
                     out_row[index] = _multiply_column(
                         out_row[index], multiplier, iteration
                     )
+                for index, bind_processor in bind_processors:
+                    out_row[index] = bind_processor(out_row[index])
                 buffer.append(tuple(out_row))
                 if len(buffer) > DESTINATION_BUFFER_SIZE:
                     _flush_buffer()
@@ -272,7 +292,7 @@ class Sampler:
 
         with self.source_engine.execution_options().connect() as conn:
             self._materialize_tables(conn, plan)
-            self._copy_results(conn, plan, insert_order, table_column_multipliers)
+            self._copy_results(conn, meta, plan, insert_order, table_column_multipliers)
 
     def _materialize_tables(self, conn, plan: SubsetPlan) -> None:
         for table, query in plan.queries.items():
@@ -309,6 +329,7 @@ class Sampler:
     def _copy_results(
         self,
         conn,
+        meta: DatabaseMetadata,
         plan: SubsetPlan,
         insert_order: List[str],
         table_column_multipliers: Dict[str, Set[str]],
@@ -345,15 +366,22 @@ class Sampler:
             def _count_rows(result):
                 nonlocal rows
                 for row in tqdm(result, desc="row progress", unit="rows"):
+                    # result_processor
                     rows += 1
                     yield row
+
+            table_columns = meta.tables[(schema, table_name)].columns
+            processed_results = self.sql_enc.result_processor(
+                [table_columns[column].type_ for column in columns],
+                result,
+            )
 
             column_multipliers = table_column_multipliers.get(table)
             self.output.output_result_set(
                 schema,
                 table_name,
                 columns,
-                _count_rows(result),
+                _count_rows(processed_results),
                 filter_view=filter_view,
                 multiplier=(
                     1

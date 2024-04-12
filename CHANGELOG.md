@@ -1,6 +1,8 @@
 # v0.2.1
 
 - Added support for remapping schema and table names in sampling phase
+- Patch support for JSON data types
+- Improve live database testing
 
 # v0.2.0
 
