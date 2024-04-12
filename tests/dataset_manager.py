@@ -5,7 +5,13 @@ import sqlalchemy as sa
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from subsetter.common import DEFAULT_DIALECT, DatabaseConfig, parse_table_name
+from subsetter.common import (
+    DEFAULT_DIALECT,
+    DatabaseConfig,
+    SQLStatementSelect,
+    SQLTableIdentifier,
+    parse_table_name,
+)
 from subsetter.sql_dialects import SQLDialectEncoder
 
 DATASETS_BASE_PATH = os.path.join(os.path.dirname(__file__), "datasets")
@@ -81,7 +87,9 @@ def apply_dataset(db_config: DatabaseConfig, name: str) -> None:
     for table, table_config in config.tables.items():
         schema, table_name = parse_table_name(table)
         table_config.make_table(metadata, schema, table_name)
+        table_config.make_table(metadata, schema + "_out", table_name)
         schemas.add(schema)
+        schemas.add(schema + "_out")
 
     with engine.connect() as conn:
         if db_config.dialect == "mysql":
@@ -98,6 +106,42 @@ def apply_dataset(db_config: DatabaseConfig, name: str) -> None:
                     )
                 )
                 conn.execute(sa.text(f"CREATE SCHEMA {sql_enc.identifier(schema)}"))
+
         conn.commit()
 
     metadata.create_all(engine)
+
+    with engine.connect() as conn:
+        for table, rows in config.data.items():
+            schema, table_name = parse_table_name(table)
+            columns = [_col_spec(col).name for col in config.tables[table].columns]
+            for row in rows:
+                conn.execute(
+                    sa.text(
+                        f"INSERT INTO {sql_enc.table_name(schema, table_name)} "
+                        f"({sql_enc.column_list(columns)}) VALUES :data"
+                    ),
+                    {"data": tuple(row)},
+                )
+
+        conn.commit()
+
+
+def get_rows(db_config, schema: str, table: str) -> List[Dict[str, Any]]:
+    dialect = db_config.dialect or DEFAULT_DIALECT
+    sql_enc = SQLDialectEncoder.from_dialect(dialect)
+
+    engine = sa.create_engine(db_config.database_url())
+    with engine.connect() as conn:
+        stmt = SQLStatementSelect(
+            type_="select",
+            from_=SQLTableIdentifier(
+                table_schema=schema,
+                table_name=table,
+            ),
+        )
+        params: Dict[str, Any] = {}
+        sql = stmt.build(sql_enc, params)
+        result = conn.execute(sa.text(sql), params)
+
+        return [dict(row) for row in result.mappings()]

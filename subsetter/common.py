@@ -185,7 +185,16 @@ class SQLWhereClauseOperator(BaseModel):
             result.append(self.values.build(sql_enc, params_out))
             result.append(")")
         else:
-            result.append(_set_param(params_out, self.values))
+            result.append(
+                _set_param(
+                    params_out,
+                    (
+                        tuple(self.values)
+                        if isinstance(self.values, list)
+                        else self.values
+                    ),
+                )
+            )
         return "".join(result)
 
     def simplify(self) -> "SQLWhereClause":

@@ -2,7 +2,8 @@ import abc
 import json
 import logging
 import os
-from typing import Any, Dict, List, Literal, Optional, Set, Union
+import re
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
@@ -52,8 +53,14 @@ class MultiplicityConfig(BaseModel):
     ignore_primary_key_columns: Dict[str, List[str]] = {}
 
 
+class TableRemapPattern(BaseModel):
+    search: str
+    replace: str
+
+
 class DatabaseOutputConfig(DatabaseConfig):
     mode: Literal["database"]
+    remap: List[TableRemapPattern] = []
 
 
 OutputType = Annotated[
@@ -69,9 +76,6 @@ class SamplerConfig(BaseModel):
     multiplicity: MultiplicityConfig = MultiplicityConfig()
 
 
-SamplerConfig.update_forward_refs()
-
-
 class SamplerOutput(abc.ABC):
     def output_result_set(
         self,
@@ -84,9 +88,6 @@ class SamplerOutput(abc.ABC):
         multiplier: int = 1,
         column_multipliers: Optional[Set[str]] = None,
     ) -> None:
-        pass
-
-    def truncate(self, schema: str, table_name: str) -> None:
         pass
 
     def insert_order(self, tables: List[str], *, truncate: bool = False) -> List[str]:
@@ -141,26 +142,31 @@ class DatabaseOutput(SamplerOutput):
     def __init__(self, config: DatabaseOutputConfig) -> None:
         self.engine = config.database_engine(env_prefix="SUBSET_DESTINATION_")
         self.sql_enc = SQLDialectEncoder.from_dialect(
-            config.dialect or os.getenv("SUBSET_DESTINATION_DIALECT") or DEFAULT_DIALECT
+            config.dialect or os.getenv("SUBSET_DESTINATION_DIALECT") or DEFAULT_DIALECT  # type: ignore
         )
+        self.remap = config.remap
 
-    def truncate(self, schema: str, table_name: str) -> None:
-        LOGGER.info("Truncating table %s.%s", schema, table_name)
-        with self.engine.connect() as conn:
-            conn.execute(
-                sa.text(
-                    f"DELETE FROM {self.sql_enc.table_name(schema, table_name)} WHERE 1=1"
-                )
-            )
-            conn.commit()
+    def _remap_table(self, schema: str, table_name: str) -> Tuple[str, str]:
+        table = f"{schema}.{table_name}"
+        for remap_pattern in self.remap:
+            table = re.sub(remap_pattern.search, remap_pattern.replace, table)
+        return parse_table_name(table)
 
     def insert_order(self, tables: List[str], *, truncate: bool = True) -> List[str]:
+        table_remap: Dict[str, str] = {}
+        for table in tables:
+            remapped_table = ".".join(self._remap_table(*parse_table_name(table)))
+            if table_remap.setdefault(remapped_table, table) != table:
+                raise ValueError(
+                    f"Multiple tables remapped to the same name {remapped_table}"
+                )
+
         meta, additional_tables = DatabaseMetadata.from_engine(
             self.engine,
-            tables,
+            list(table_remap),
             close_backward=truncate,
         )
-        for table in tables:
+        for table in table_remap:
             if parse_table_name(table) not in meta.tables:
                 LOGGER.warning(
                     "Database does not have table %s, will not sample", table
@@ -171,7 +177,26 @@ class DatabaseOutput(SamplerOutput):
                 schema,
                 table_name,
             )
-        return [str(table) for table in meta.toposort()]
+
+        insert_order_mapped = [str(table) for table in meta.toposort()]
+
+        if truncate:
+            with self.engine.connect() as conn:
+                for table in reversed(insert_order_mapped):
+                    schema, table_name = parse_table_name(table)
+                    LOGGER.info("Truncating table %s.%s", schema, table_name)
+                    conn.execute(
+                        sa.text(
+                            f"DELETE FROM {self.sql_enc.table_name(schema, table_name)} WHERE 1=1"
+                        )
+                    )
+                    conn.commit()
+
+        return [
+            remapped_table
+            for table in insert_order_mapped
+            if (remapped_table := table_remap.get(table, ""))
+        ]
 
     def output_result_set(
         self,
@@ -190,6 +215,7 @@ class DatabaseOutput(SamplerOutput):
             for ind, col_name in enumerate(columns_out)
             if col_name in (column_multipliers or set())
         ]
+        schema, table_name = self._remap_table(schema, table_name)
         insert_query = (
             f"INSERT INTO {self.sql_enc.table_name(schema, table_name)} "
             f"({self.sql_enc.column_list(columns_out)}) VALUES "
@@ -244,16 +270,9 @@ class Sampler:
             meta, list(plan.queries)
         )
 
-        if truncate:
-            self._truncate(insert_order)
         with self.source_engine.execution_options().connect() as conn:
             self._materialize_tables(conn, plan)
             self._copy_results(conn, plan, insert_order, table_column_multipliers)
-
-    def _truncate(self, insert_order: List[str]) -> None:
-        for table in reversed(insert_order):
-            schema, table_name = parse_table_name(table)
-            self.output.truncate(schema, table_name)
 
     def _materialize_tables(self, conn, plan: SubsetPlan) -> None:
         for table, query in plan.queries.items():
