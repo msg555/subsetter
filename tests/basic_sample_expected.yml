@@ -1,0 +1,24 @@
+users:
+  - id: 1
+    name: john
+    sample: 1
+  - id: 3
+    name: richard
+    sample: 1
+orders:
+  - id: 1
+    user_id: 1
+    name: stuff
+  - id: 3
+    user_id: 3
+    name: gold
+order_status:
+  - id: 1
+    order_id: 1
+    info: pending
+  - id: 2
+    order_id: 1
+    info: sent
+  - id: 4
+    order_id: 3
+    info: lost

@@ -38,7 +38,7 @@ sampling plan defines the query that will be used to sample each table
 
 is nothing more than an ordered sequence of SQL describing how
 to sample each requested database table. You'll want to create a configuration
-file similar to [planner_config.sample.yaml](planner_config.sample.yaml) that
+file similar to [planner_config.example.yaml](planner_config.example.yaml) that
 tells the planner what tables you want to sample along with any additional
 constraints that should be considered. Then you can create a plan with the
 below command:

@@ -42,8 +42,12 @@ queries:
   test.users:
     materialize: true
     statement:
+      type: select
       from:
         schema: test
         table: users
-      limit: 10
-      type: select
+      where:
+        type: operator
+        operator: in
+        columns: [sample]
+        values: [1]

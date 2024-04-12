@@ -31,6 +31,13 @@ output:
     - SET @@session.wait_timeout=28800
     - SET @@session.innodb_lock_wait_timeout=3600
 
+  # Apply regex search and replace rules to each source "schema.table" name.
+  # Will attempt to apply each replacement in the order they are listed. Example
+  # below can be used to add the suffix "_out" to the schema.
+  remap:
+    - search: "^(\w+)\."
+      replace: "\1_out."
+
 # Alternative configuration to output JSON files within a directory
 # output:
 #   mode: directory
