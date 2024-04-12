@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any, Dict, List, Union
 
@@ -12,6 +13,8 @@ from subsetter.common import (
     SQLTableIdentifier,
     parse_table_name,
 )
+from subsetter.planner import Planner, PlannerConfig, SubsetPlan
+from subsetter.sampler import DatabaseOutputConfig, Sampler, SamplerConfig
 from subsetter.sql_dialects import SQLDialectEncoder
 
 DATASETS_BASE_PATH = os.path.join(os.path.dirname(__file__), "datasets")
@@ -35,26 +38,34 @@ class TestDataset(BaseModel):
         primary_key: List[str] = []
         foreign_keys: List[ForeignKeyDescriptor] = []
 
-        def make_table(self, metadata: sa.MetaData, schema: str, name: str) -> sa.Table:
+        def make_table(
+            self, metadata: sa.MetaData, schema: str, name: str, schema_suffix: str = ""
+        ) -> sa.Table:
             table = sa.Table(
                 name,
                 metadata,
-                schema=schema,
+                schema=schema + schema_suffix,
                 *(_col_spec(col) for col in self.columns),
             )
             if self.primary_key:
                 table.append_constraint(sa.PrimaryKeyConstraint(*self.primary_key))
             for fk in self.foreign_keys:
+                dst_schema, dst_table = parse_table_name(fk.dst_table)
                 table.append_constraint(
                     sa.ForeignKeyConstraint(
                         fk.columns,
-                        [f"{fk.dst_table}.{ref_col}" for ref_col in fk.dst_columns],
+                        [
+                            f"{dst_schema}{schema_suffix}.{dst_table}.{ref_col}"
+                            for ref_col in fk.dst_columns
+                        ],
                     )
                 )
             return table
 
     tables: Dict[str, TableDescriptor]
     data: Dict[str, List[List[Any]]]
+    expected_plan: SubsetPlan
+    expected_sample: Dict[str, List[Dict[str, Any]]]
 
 
 def _col_spec(col: Union[str, ColumnDescriptor]) -> sa.Column:
@@ -70,16 +81,14 @@ def _col_spec(col: Union[str, ColumnDescriptor]) -> sa.Column:
         return sa.Column(col_desc.name, sa.Text)
     if col_desc.type_ == "int":
         return sa.Column(col_desc.name, sa.Integer)
+    if col_desc.type_ == "json":
+        return sa.Column(col_desc.name, sa.JSON)
     raise ValueError(f"Unknown type {col_desc.type_}")
 
 
-def apply_dataset(db_config: DatabaseConfig, name: str) -> None:
+def apply_dataset(db_config: DatabaseConfig, config: TestDataset) -> None:
     dialect = db_config.dialect or DEFAULT_DIALECT
     sql_enc = SQLDialectEncoder.from_dialect(dialect)
-
-    dataset_path = os.path.join(DATASETS_BASE_PATH, f"{name}.yaml")
-    with open(dataset_path, "r", encoding="utf-8") as fdataset:
-        config = TestDataset.model_validate(yaml.safe_load(fdataset))
     engine = sa.create_engine(db_config.database_url())
 
     schemas = set()
@@ -87,7 +96,7 @@ def apply_dataset(db_config: DatabaseConfig, name: str) -> None:
     for table, table_config in config.tables.items():
         schema, table_name = parse_table_name(table)
         table_config.make_table(metadata, schema, table_name)
-        table_config.make_table(metadata, schema + "_out", table_name)
+        table_config.make_table(metadata, schema, table_name, schema_suffix="_out")
         schemas.add(schema)
         schemas.add(schema + "_out")
 
@@ -114,22 +123,35 @@ def apply_dataset(db_config: DatabaseConfig, name: str) -> None:
     with engine.connect() as conn:
         for table, rows in config.data.items():
             schema, table_name = parse_table_name(table)
-            columns = [_col_spec(col).name for col in config.tables[table].columns]
+            col_specs = [_col_spec(col) for col in config.tables[table].columns]
+            col_names = [col_spec.name for col_spec in col_specs]
             for row in rows:
+                insert_row = tuple(
+                    json.dumps(col) if isinstance(col_spec.type, sa.JSON) else col
+                    for col_spec, col in zip(col_specs, row)
+                )
                 conn.execute(
                     sa.text(
                         f"INSERT INTO {sql_enc.table_name(schema, table_name)} "
-                        f"({sql_enc.column_list(columns)}) VALUES :data"
+                        f"({sql_enc.column_list(col_names)}) VALUES :data"
                     ),
-                    {"data": tuple(row)},
+                    {
+                        "data": insert_row,
+                    },
                 )
 
         conn.commit()
 
 
-def get_rows(db_config, schema: str, table: str) -> List[Dict[str, Any]]:
+def get_rows(
+    db_config, config: TestDataset, schema: str, table: str
+) -> List[Dict[str, Any]]:
     dialect = db_config.dialect or DEFAULT_DIALECT
     sql_enc = SQLDialectEncoder.from_dialect(dialect)
+
+    col_types = [
+        _col_spec(col).type for col in config.tables[f"{schema[:-4]}.{table}"].columns
+    ]
 
     engine = sa.create_engine(db_config.database_url())
     with engine.connect() as conn:
@@ -143,5 +165,60 @@ def get_rows(db_config, schema: str, table: str) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {}
         sql = stmt.build(sql_enc, params)
         result = conn.execute(sa.text(sql), params)
+        columns = list(result.keys())
 
-        return [dict(row) for row in result.mappings()]
+        return [
+            dict(zip(columns, row))
+            for row in sql_enc.result_processor(col_types, result)
+        ]
+
+
+def do_dataset_test(db_config: DatabaseConfig, dataset_name: str) -> None:
+    dataset_path = os.path.join(DATASETS_BASE_PATH, f"{dataset_name}.yaml")
+    with open(dataset_path, "r", encoding="utf-8") as fdataset:
+        test_config = TestDataset.model_validate(yaml.safe_load(fdataset))
+
+    apply_dataset(db_config, test_config)
+    plan_config = PlannerConfig(
+        source=db_config,
+        targets={
+            "test.users": PlannerConfig.TargetConfig(  # type: ignore
+                **{"in": {"sample": [1]}}
+            ),
+        },
+        select=[
+            "test.*",
+        ],
+    )
+    planner = Planner(plan_config)
+    plan = planner.plan()
+
+    if plan != test_config.expected_plan:
+        print("Computed plan:", plan.model_dump_json(indent=2))
+        assert plan == test_config.expected_plan, "Got unexpected plan"
+
+    sample_config = SamplerConfig(
+        source=db_config,
+        output=DatabaseOutputConfig(
+            mode="database",
+            remap=[
+                {
+                    "search": r"^(\w+)\.",
+                    "replace": r"\1_out.",
+                },
+            ],
+            **db_config.model_dump(),
+        ),
+    )
+
+    sampler = Sampler(sample_config)
+    sampler.sample(plan)
+
+    sample = {
+        table: get_rows(db_config, test_config, *parse_table_name(table))
+        for table in test_config.expected_sample
+    }
+
+    if sample != test_config.expected_sample:
+        print("Computed sample:", json.dumps(sample, indent=2))
+        assert sample == test_config.expected_sample, "Got unexpected sample"

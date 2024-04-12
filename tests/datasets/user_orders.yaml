@@ -30,3 +30,84 @@ data:
     - [2, 1, sent]
     - [3, 2, delivered]
     - [4, 3, lost]
+
+expected_plan:
+  queries:
+    test.order_status:
+      materialize: false
+      statement:
+        from:
+          schema: test
+          table: order_status
+        type: select
+        where:
+          columns:
+          - order_id
+          operator: in
+          type: operator
+          values:
+            columns:
+            - id
+            from:
+              sampled: true
+              schema: test
+              table: orders
+            type: select
+    test.orders:
+      materialize: true
+      statement:
+        from:
+          schema: test
+          table: orders
+        type: select
+        where:
+          columns:
+          - user_id
+          operator: in
+          type: operator
+          values:
+            columns:
+            - id
+            from:
+              sampled: true
+              schema: test
+              table: users
+            type: select
+    test.users:
+      materialize: true
+      statement:
+        type: select
+        from:
+          schema: test
+          table: users
+        where:
+          type: operator
+          operator: in
+          columns: [sample]
+          values: [1]
+
+expected_sample:
+  test_out.users:
+    - id: 1
+      name: john
+      sample: 1
+    - id: 3
+      name: richard
+      sample: 1
+  test_out.orders:
+    - id: 1
+      user_id: 1
+      name: stuff
+    - id: 3
+      user_id: 3
+      name: gold
+  test_out.order_status:
+    - id: 1
+      order_id: 1
+      info: pending
+    - id: 2
+      order_id: 1
+      info: sent
+    - id: 4
+      order_id: 3
+      info: lost

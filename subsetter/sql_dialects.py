@@ -1,5 +1,8 @@
 import abc
-from typing import Iterable, Literal
+import json
+from typing import Any, Iterable, List, Literal
+
+import sqlalchemy as sa
 
 DatabaseDialect = Literal[
     "mysql",
@@ -36,6 +39,11 @@ class SQLDialectEncoder(abc.ABC):
     def random(self) -> str:
         """Encode a call to a random number function"""
 
+    def result_processor(self, column_types, result) -> Iterable[List[Any]]:
+        """Decode columns from result set"""
+        # pylint: disable=unused-argument
+        yield from result
+
 
 class MysqlDialectEncoder(SQLDialectEncoder):
     def identifier(self, identifier: str) -> str:
@@ -56,6 +64,23 @@ class MysqlDialectEncoder(SQLDialectEncoder):
 
     def random(self) -> str:
         return "rand()"
+
+    def result_processor(self, column_types, result) -> Iterable[List[Any]]:
+        """Decode columns from result set"""
+        processors = []
+        for index, column_type in enumerate(column_types):
+            if isinstance(column_type, sa.JSON):
+                processors.append((index, lambda x: json.loads(x) if x else None))
+
+        if not processors:
+            yield from result
+            return
+
+        for row in result:
+            nrow = list(row)
+            for index, processor in processors:
+                nrow[index] = processor(nrow[index])
+            yield nrow
 
 
 class PostgresDialectEncoder(SQLDialectEncoder):

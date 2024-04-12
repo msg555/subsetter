@@ -26,7 +26,7 @@ class ForeignKey:
 
 @dataclasses.dataclass(frozen=True)
 class ColumnDefinition:
-    type_: str
+    type_: Any
     default: Any
     comment: Optional[str]
     nullable: bool

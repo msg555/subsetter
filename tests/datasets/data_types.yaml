@@ -1,0 +1,56 @@
+tables:
+  test.users:
+    primary_key: [id]
+    columns: [id, info|json, sample]
+
+data:
+  test.users:
+    - [1, {address: "123 Easy St"}, 1]
+    - [2, {name: "Jordan", address: null}, 1]
+    - [3, {}, 1]
+    - [4, null, 1]
+    - [5, [this, is, odd], 1]
+    - [6, 555, 1]
+    - [7, "this is also odd", 1]
+    - [8, '{"message": "keep it together"}', 1]
+
+expected_plan:
+  queries:
+    test.users:
+      statement:
+        type: select
+        from:
+          schema: test
+          table: users
+        where:
+          type: operator
+          operator: in
+          columns: [sample]
+          values: [1]
+
+expected_sample:
+  test_out.users:
+    - id: 1
+      info: {address: "123 Easy St"}
+      sample: 1
+    - id: 2
+      info: {name: "Jordan", address: null}
+      sample: 1
+    - id: 3
+      info: {}
+      sample: 1
+    - id: 4
+      info: null
+      sample: 1
+    - id: 5
+      info: [this, is, odd]
+      sample: 1
+    - id: 6
+      info: 555
+      sample: 1
+    - id: 7
+      info: this is also odd
+      sample: 1
+    - id: 8
+      info: '{"message": "keep it together"}'
+      sample: 1
