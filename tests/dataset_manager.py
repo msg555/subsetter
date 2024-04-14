@@ -9,9 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from subsetter.common import (
     DEFAULT_DIALECT,
     DatabaseConfig,
+    parse_table_name,
+)
+from subsetter.plan_model import (
     SQLStatementSelect,
     SQLTableIdentifier,
-    parse_table_name,
 )
 from subsetter.planner import Planner, PlannerConfig, SubsetPlan
 from subsetter.sampler import DatabaseOutputConfig, Sampler, SamplerConfig
@@ -146,31 +148,11 @@ def apply_dataset(db_config: DatabaseConfig, config: TestDataset) -> None:
 def get_rows(
     db_config, config: TestDataset, schema: str, table: str
 ) -> List[Dict[str, Any]]:
-    dialect = db_config.dialect or DEFAULT_DIALECT
-    sql_enc = SQLDialectEncoder.from_dialect(dialect)
-
-    col_types = [
-        _col_spec(col).type for col in config.tables[f"{schema[:-4]}.{table}"].columns
-    ]
-
     engine = sa.create_engine(db_config.database_url())
     with engine.connect() as conn:
-        stmt = SQLStatementSelect(
-            type_="select",
-            from_=SQLTableIdentifier(
-                table_schema=schema,
-                table_name=table,
-            ),
-        )
-        params: Dict[str, Any] = {}
-        sql = stmt.build(sql_enc, params)
-        result = conn.execute(sa.text(sql), params)
-        columns = list(result.keys())
-
-        return [
-            dict(zip(columns, row))
-            for row in sql_enc.result_processor(col_types, result)
-        ]
+        metadata_obj = sa.MetaData()
+        table = sa.Table(table, metadata_obj, schema=schema, autoload_with=conn)
+        return list(conn.execute(sa.select(table)).mappings())
 
 
 def do_dataset_test(db_config: DatabaseConfig, dataset_name: str) -> None:

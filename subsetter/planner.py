@@ -7,6 +7,10 @@ from pydantic import BaseModel, Field
 from subsetter.common import (
     DEFAULT_DIALECT,
     DatabaseConfig,
+    parse_table_name,
+)
+
+from subsetter.plan_model import (
     SQLKnownOperator,
     SQLLiteralType,
     SQLStatementSelect,
@@ -16,10 +20,11 @@ from subsetter.common import (
     SQLWhereClause,
     SQLWhereClauseAnd,
     SQLWhereClauseOperator,
+    SQLWhereClauseIn,
     SQLWhereClauseOr,
     SQLWhereClauseRandom,
     SQLWhereClauseSQL,
-    parse_table_name,
+    SubsetPlan,
 )
 from subsetter.metadata import DatabaseMetadata, ForeignKey, TableMetadata
 from subsetter.solver import dfs, order_graph, reverse_graph, subgraph
@@ -64,9 +69,6 @@ class PlannerConfig(BaseModel):
     normalize_foreign_keys: bool = False
     output_sql: bool = False
 
-
-class SubsetPlan(BaseModel):
-    queries: Dict[str, SQLTableQuery]
 
 
 class Planner:
@@ -289,9 +291,8 @@ class Planner:
 
             if not target or not target.all_:
                 fk_constraints.append(
-                    SQLWhereClauseOperator(
-                        type_="operator",
-                        operator="in",
+                    SQLWhereClauseIn(
+                        type_="in",
                         columns=list(fk.columns),
                         values=SQLStatementSelect(
                             type_="select",
@@ -309,14 +310,15 @@ class Planner:
             f"{table.schema}.{table.name}", []
         )
         conf_constraints_sql: List[SQLWhereClause] = []
+        all_columns = {column.name for column in table.table_obj.columns}
         for conf_constraint in conf_constraints:
-            if conf_constraint.column in table.columns:
+            if conf_constraint.column in all_columns:
                 conf_constraints_sql.append(
                     SQLWhereClauseOperator(
                         type_="operator",
                         operator=conf_constraint.operator,
-                        columns=[conf_constraint.column],
-                        values=conf_constraint.value,
+                        column=conf_constraint.column,
+                        value=conf_constraint.value,
                     )
                 )
 
@@ -367,8 +369,8 @@ class Planner:
                             SQLWhereClauseOperator(
                                 type_="operator",
                                 operator="like",
-                                columns=[column],
-                                values=pattern,
+                                column=column,
+                                value=pattern,
                             )
                             for pattern in patterns
                         ],
@@ -377,11 +379,10 @@ class Planner:
 
             for column, in_list in target.in_.items():
                 target_constraints.append(
-                    SQLWhereClauseOperator(
-                        type_="operator",
-                        operator="in",
+                    SQLWhereClauseIn(
+                        type_="in",
                         columns=[column],
-                        values=in_list,
+                        values=[in_list],
                     )
                 )
 

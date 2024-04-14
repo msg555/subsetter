@@ -1,9 +1,8 @@
 import collections
 import dataclasses
-import itertools
 import logging
 from fnmatch import fnmatch
-from typing import Any, Dict, List, Optional, Set, TextIO, Tuple
+from typing import Dict, List, Optional, Set, TextIO, Tuple
 
 import sqlalchemy as sa
 
@@ -23,145 +22,47 @@ class ForeignKey:
     dst_table: str
     dst_columns: Tuple[str, ...]
 
-
-@dataclasses.dataclass(frozen=True)
-class ColumnDefinition:
-    type_: Any
-    default: Any
-    comment: Optional[str]
-    nullable: bool
+    @classmethod
+    def from_schema(cls, fk: sa.ForeignKeyConstraint) -> "ForeignKey":
+        assert fk.referred_table.schema is not None
+        return cls(
+            columns=tuple(col.name for col in fk.columns),
+            dst_schema=fk.referred_table.schema,
+            dst_table=fk.referred_table.name,
+            dst_columns=tuple(elem.column.name for elem in fk.elements),
+        )
 
 
 class TableMetadata:
     def __init__(
         self,
-        *,
-        schema: str,
-        name: str,
-        columns: Dict[str, ColumnDefinition],
-        primary_key: Tuple[str, ...],
-        foreign_keys: List[ForeignKey],
+        table_obj: sa.Table,
     ) -> None:
-        self.schema = schema
-        self.name = name
-        self.columns = columns
-        self.primary_key = primary_key
-        self.foreign_keys = list(foreign_keys)
+        assert table_obj.schema is not None
+        self.table_obj = table_obj
+        self.schema = table_obj.schema
+        self.name = table_obj.name
+        self.primary_key = tuple(
+            column.name for column in table_obj.primary_key.columns
+        )
+        self.foreign_keys = [
+            ForeignKey.from_schema(fk) for fk in table_obj.foreign_key_constraints
+        ]
         self.rev_foreign_keys: List[ForeignKey] = []
 
     def __str__(self) -> str:
         return f"{self.schema}.{self.name}"
 
-    def __repr__(self) -> str:
-        return f"{self.schema}.{self.name}"
-
-
-def _get_fks_mysql(engine: sa.engine.Engine) -> Dict[Tuple[str, str], List[ForeignKey]]:
-    """
-    Optimized query to load all foreign key relationships for a mysql database
-    """
-
-    @dataclasses.dataclass(order=True)
-    class FKConstraint:
-        ordinal_position: int
-        table_schema: str
-        table_name: str
-        column_name: str
-        dst_table_schema: str
-        dst_table_name: str
-        dst_column_name: str
-
-    fk_constraints: Dict[Tuple[str, str], List[FKConstraint]] = collections.defaultdict(
-        list
-    )
-    with engine.connect() as conn:
-        result = conn.execute(
-            sa.text(
-                "SELECT constraint_schema, constraint_name, ordinal_position, "
-                "table_schema, table_name, column_name, "
-                "referenced_table_schema, referenced_table_name, referenced_column_name "
-                "FROM information_schema.key_column_usage WHERE referenced_table_name is not NULL"
-            )
-        )
-        for row in result:
-            constraint_schema = row[0]
-            constraint_name = row[1]
-            fk_constraints[(constraint_schema, constraint_name)].append(
-                FKConstraint(*row[2:9])
-            )
-
-    all_fks: Dict[Tuple[str, str], List[ForeignKey]] = collections.defaultdict(list)
-    for cnst_list in fk_constraints.values():
-        cnst_list.sort()
-
-        # Assert that ordinal positions make sense
-        assert all(
-            cnst.ordinal_position == ind + 1 for ind, cnst in enumerate(cnst_list)
-        )
-
-        src_schema = cnst_list[0].table_schema
-        src_table = cnst_list[0].table_name
-        dst_schema = cnst_list[0].dst_table_schema
-        dst_table = cnst_list[0].dst_table_name
-
-        # Assert that all constraints refer to the same pair of tables
-        assert all(
-            (
-                cnst.table_schema,
-                cnst.table_name,
-                cnst.dst_table_schema,
-                cnst.dst_table_name,
-            )
-            == (src_schema, src_table, dst_schema, dst_table)
-            for cnst in cnst_list
-        )
-
-        all_fks[(src_schema, src_table)].append(
-            ForeignKey(
-                columns=tuple(cnst.column_name for cnst in cnst_list),
-                dst_schema=dst_schema,
-                dst_table=dst_table,
-                dst_columns=tuple(cnst.dst_column_name for cnst in cnst_list),
-            )
-        )
-
-    return all_fks
-
-
-def _get_fks_generic(
-    engine: sa.engine.Engine,
-) -> Dict[Tuple[str, str], List[ForeignKey]]:
-    """
-    Generic implementation to load all foreign key relationships using the
-    SQLAlchemy inspector interface.
-    """
-    result = {}
-
-    inspector = sa.inspect(engine)
-    for schema in inspector.get_schema_names():
-        for table_key, table_fks in inspector.get_multi_foreign_keys(schema).items():
-            result[(table_key[0] or schema, table_key[1])] = [
-                ForeignKey(
-                    columns=tuple(key["constrained_columns"]),
-                    dst_schema=key["referred_schema"] or schema,
-                    dst_table=key["referred_table"],
-                    dst_columns=tuple(key["referred_columns"]),
-                )
-                for key in table_fks
-            ]
-
-    return result
-
-
-def _get_fks(engine: sa.engine.Engine) -> Dict[Tuple[str, str], List[ForeignKey]]:
-    if engine.name == "mysql":
-        return _get_fks_mysql(engine)
-    return _get_fks_generic(engine)
-
 
 class DatabaseMetadata:
-    def __init__(self) -> None:
-        self.tables: Dict[Tuple[str, str], TableMetadata] = {}
+    def __init__(
+        self,
+        metadata_obj: sa.MetaData,
+        tables: Dict[Tuple[str, str], TableMetadata],
+    ) -> None:
+        self.metadata_obj = metadata_obj
+        self.tables = tables
+        self.temp_tables: Dict[Tuple[str, str], sa.Table] = {}
 
     @classmethod
     def from_engine(
@@ -172,70 +73,55 @@ class DatabaseMetadata:
         close_forward=False,
         close_backward=False,
     ) -> Tuple["DatabaseMetadata", List[Tuple[str, str]]]:
-        all_fks = _get_fks(engine)
-        all_rev_fks = collections.defaultdict(list)
-        for (schema, table_name), foreign_keys in all_fks.items():
-            for foreign_key in foreign_keys:
-                all_rev_fks[(foreign_key.dst_schema, foreign_key.dst_table)].append(
-                    ForeignKey(
-                        columns=foreign_key.dst_columns,
-                        dst_schema=schema,
-                        dst_table=table_name,
-                        dst_columns=foreign_key.columns,
-                    )
-                )
 
-        meta = cls()
         inspector = sa.inspect(engine)
-
-        table_queue = []
-        table_set = set()
+        metadata_obj = sa.MetaData()
         for schema in inspector.get_schema_names():
-            for table_name in inspector.get_table_names(schema=schema):
-                if not any(
-                    fnmatch(f"{schema}.{table_name}", select_pattern)
-                    for select_pattern in select
-                ):
-                    continue
-                table_set.add((schema, table_name))
-                table_queue.append((schema, table_name))
+            metadata_obj.reflect(bind=engine, schema=schema)
+
+        table_set: Set[Tuple[str, str]] = set()
+        table_queue: List[Tuple[str, str]] = []
+        for table_id, table_obj in metadata_obj.tables.items():
+            assert table_obj.schema is not None
+            if any(fnmatch(table_id, select_pattern) for select_pattern in select):
+                table_set.add((table_obj.schema, table_obj.name))
+                table_queue.append((table_obj.schema, table_obj.name))
+
+        table_deps: Dict[Tuple[str, str], List[Tuple[str, str]]] = (
+            collections.defaultdict(list)
+        )
+        for table_obj in metadata_obj.tables.values():
+            assert table_obj.schema is not None
+            for fk in table_obj.foreign_key_constraints:
+                ref_table_obj = fk.referred_table
+                assert ref_table_obj.schema is not None
+                if close_forward:
+                    table_deps[(table_obj.schema, table_obj.name)].append(
+                        (ref_table_obj.schema, ref_table_obj.name)
+                    )
+                if close_backward:
+                    table_deps[(ref_table_obj.schema, ref_table_obj.name)].append(
+                        (table_obj.schema, table_obj.name)
+                    )
+
         num_selected_tables = len(table_queue)
+        for schema, table in table_queue:
+            table_obj = metadata_obj.tables[f"{schema}.{table}"]
+            for ref_schema, ref_table in table_deps[(schema, table)]:
+                if (ref_schema, ref_table) not in table_set:
+                    table_set.add((ref_schema, ref_table))
+                    table_queue.append((ref_schema, ref_table))
 
-        for schema, table_name in table_queue:
-            # TODO: Consider using inspector.get_multi_columns
-            # TODO: Consider using inspector.get_multi_pk_constraint
-            col_specs = inspector.get_columns(table_name, schema=schema)
-            table = TableMetadata(
-                schema=schema,
-                name=table_name,
-                columns={
-                    column["name"]: ColumnDefinition(
-                        type_=column["type"],
-                        default=column["default"],
-                        comment=column["comment"],
-                        nullable=column["nullable"],
-                    )
-                    for column in col_specs
-                },
-                primary_key=tuple(
-                    inspector.get_pk_constraint(table_name, schema=schema).get(
-                        "constrained_columns", []
-                    )
-                ),
-                foreign_keys=all_fks[(schema, table_name)],
-            )
-
-            for foreign_key in itertools.chain(
-                all_fks[(table.schema, table.name)] if close_forward else (),
-                all_rev_fks[(table.schema, table.name)] if close_backward else (),
-            ):
-                if (foreign_key.dst_schema, foreign_key.dst_table) not in table_set:
-                    table_set.add((foreign_key.dst_schema, foreign_key.dst_table))
-                    table_queue.append((foreign_key.dst_schema, foreign_key.dst_table))
-
-            meta.tables[(schema, table_name)] = table
-
-        return meta, table_queue[num_selected_tables:]
+        return (
+            cls(
+                metadata_obj,
+                {
+                    (schema, table): TableMetadata(metadata_obj.tables[f"{schema}.{table}"])
+                    for schema, table in table_queue
+                }
+            ),
+            table_queue[num_selected_tables:],
+        )
 
     def infer_missing_foreign_keys(self) -> None:
         pk_map: Dict[Tuple[str, Tuple[str, ...]], Optional[TableMetadata]] = {}
@@ -251,14 +137,14 @@ class DatabaseMetadata:
         # Only infer single column primary keys
         for table in self.tables.values():
             fks = set(table.foreign_keys)
-            for col in table.columns:
-                dst_table = pk_map.get((table.schema, (col,)))
+            for col in table.table_obj.columns:
+                dst_table = pk_map.get((table.schema, (col.name,)))
                 if dst_table is not None and dst_table is not table:
                     fk = ForeignKey(
-                        columns=(col,),
+                        columns=(col.name,),
                         dst_schema=dst_table.schema,
                         dst_table=dst_table.name,
-                        dst_columns=(col,),
+                        dst_columns=(col.name,),
                     )
                     if fk not in fks:
                         LOGGER.info(
