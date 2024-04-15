@@ -1,12 +1,14 @@
 import logging
 import os
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import sqlalchemy as sa
-from pydantic import BaseModel, ConfigDict, Field
-from typing_extensions import Annotated
+from pydantic import BaseModel
 
-from subsetter.sql_dialects import DatabaseDialect, SQLDialectEncoder
+DatabaseDialect = Literal[
+    "mysql",
+    "postgres",
+]
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_DIALECT: Literal["mysql"] = "mysql"

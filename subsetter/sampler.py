@@ -3,20 +3,17 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.expression import ClauseElement, Executable
 from typing_extensions import Annotated
 
-from subsetter.common import (
-    DEFAULT_DIALECT,
-    DatabaseConfig,
-    SQLDialectEncoder,
-    parse_table_name,
-)
+from subsetter.common import DatabaseConfig, parse_table_name
 from subsetter.filters import FilterConfig, FilterView, FilterViewChain
-from subsetter.metadata import DatabaseMetadata, TableMetadata
+from subsetter.metadata import DatabaseMetadata
 from subsetter.planner import SubsetPlan
 
 try:
@@ -32,29 +29,49 @@ SOURCE_BUFFER_SIZE = 1024
 DESTINATION_BUFFER_SIZE = 1024
 
 
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql.expression import ClauseElement, Executable
-
+# pylint: disable=too-many-ancestors,abstract-method
 class TemporaryTable(Executable, ClauseElement):
-    def __init__(self, name: str, select: sa.Select) -> None:
+    inherit_cache = True
+
+    TEMP_ID = "_tmp_subsetter_"
+
+    def __init__(self, schema: str, name: str, select: sa.Select) -> None:
+        self.schema = schema
         self.name = name
         self.select = select
+        self.table_obj: sa.Table
+
+    def _temporary_table_compile_generic(self, compiler, **_) -> str:
+        name = self.name + self.TEMP_ID
+        schema_enc = compiler.dialect.identifier_preparer.quote(self.schema)
+        name_enc = compiler.dialect.identifier_preparer.quote(name)
+        select_stmt = compiler.process(self.select)
         self.table_obj = sa.Table(
             name,
             sa.MetaData(),
-            *(
-                sa.Column(col.name, col.type)
-                for col in select.columns
-            )
+            *(sa.Column(col.name, col.type) for col in self.select.selected_columns),
+            schema=self.schema,
         )
+        return f"CREATE TEMPORARY TABLE {schema_enc}.{name_enc} AS {select_stmt}"
 
-@compiles(TemporaryTable, "postgresql")
-def _temporary_table_compile(temp_table, compiler, **kw) -> str:
-    name_enc = compiler.dialect.identifier_preparer.quote(temp_table.name)
-    select_stmt = compiler.process(temp_table.select)
-    return f"CREATE TEMPORARY TABLE {name_enc} AS {select_stmt}"
+    def _temporary_table_compile_postgres(self, compiler, **_) -> str:
+        """
+        Postgres creates temporary tables in a special schema. We make the table
+        name incorporate the schema name to compensate and avoid collisions.
+        """
+        name = self.schema + self.TEMP_ID + self.name
+        name_enc = compiler.dialect.identifier_preparer.quote(name)
+        select_stmt = compiler.process(self.select)
+        self.table_obj = sa.Table(
+            name,
+            sa.MetaData(),
+            *(sa.Column(col.name, col.type) for col in self.select.selected_columns),
+        )
+        return f"CREATE TEMPORARY TABLE {name_enc} AS {select_stmt}"
 
 
+compiles(TemporaryTable, "postgresql")(TemporaryTable._temporary_table_compile_postgres)
+compiles(TemporaryTable)(TemporaryTable._temporary_table_compile_generic)
 
 
 def _multiply_column(
@@ -171,11 +188,11 @@ class DirectoryOutput(SamplerOutput):
 
 
 class DatabaseOutput(SamplerOutput):
+    # Pylint getting weirdly confused about the self.meta member
+    # pylint: disable=no-member
+
     def __init__(self, config: DatabaseOutputConfig, tables: List[str]) -> None:
         self.engine = config.database_engine(env_prefix="SUBSET_DESTINATION_")
-        self.sql_enc = SQLDialectEncoder.from_dialect(
-            config.dialect or os.getenv("SUBSET_DESTINATION_DIALECT") or DEFAULT_DIALECT  # type: ignore
-        )
         self.remap = config.remap
 
         self.table_remap: Dict[str, str] = {}
@@ -186,14 +203,11 @@ class DatabaseOutput(SamplerOutput):
                     f"Multiple tables remapped to the same name {remapped_table}"
                 )
 
-        meta, additional_tables = DatabaseMetadata.from_engine(
+        self.meta, self.additional_tables = DatabaseMetadata.from_engine(
             self.engine,
             list(self.table_remap),
             close_backward=True,
         )
-
-        self.meta = meta
-        self.additional_tables = additional_tables
 
     def truncate(self) -> None:
         for schema, table_name in self.additional_tables:
@@ -206,11 +220,7 @@ class DatabaseOutput(SamplerOutput):
         with self.engine.connect() as conn:
             for table in reversed(self.meta.toposort()):
                 LOGGER.info("Truncating table %s", table)
-                conn.execute(
-                    sa.text(
-                        f"DELETE FROM {self.sql_enc.table_name(table.schema, table.name)} WHERE 1=1"
-                    )
-                )
+                conn.execute(sa.delete(table.table_obj))
                 conn.commit()
 
     def _remap_table(self, schema: str, table_name: str) -> Tuple[str, str]:
@@ -250,24 +260,15 @@ class DatabaseOutput(SamplerOutput):
             if col_name in (column_multipliers or set())
         ]
         schema, table_name = self._remap_table(schema, table_name)
-        insert_query = (
-            f"INSERT INTO {self.sql_enc.table_name(schema, table_name)} "
-            f"({self.sql_enc.column_list(columns_out)}) VALUES "
-        )
         buffer: List[tuple] = []
-
 
         table = self.meta.tables[(schema, table_name)]
 
         def _flush_buffer():
-            query = f"{insert_query}{','.join(f':{ind}' for ind in range(len(buffer)))}"
             with self.engine.connect() as conn:
                 conn.execute(
                     sa.insert(table.table_obj),
-                    [
-                        dict(zip(columns_out, row))
-                        for row in buffer
-                    ],
+                    [dict(zip(columns_out, row)) for row in buffer],
                 )
                 conn.commit()
             buffer.clear()
@@ -292,11 +293,6 @@ class Sampler:
         self.source_engine = self.config.source.database_engine(
             env_prefix="SUBSET_SOURCE_"
         )
-        self.sql_enc = SQLDialectEncoder.from_dialect(
-            self.config.source.dialect  # type: ignore
-            or os.getenv("SUBSET_SOURCE_DIALECT")
-            or DEFAULT_DIALECT
-        )
 
     def sample(self, plan: SubsetPlan, *, truncate: bool = False) -> None:
         meta, _ = DatabaseMetadata.from_engine(self.source_engine, list(plan.queries))
@@ -319,23 +315,18 @@ class Sampler:
                 output, conn, meta, plan, insert_order, table_column_multipliers
             )
 
-    def _materialize_tables(self, meta: DatabaseMetadata, conn: sa.Connection, plan: SubsetPlan) -> None:
+    def _materialize_tables(
+        self, meta: DatabaseMetadata, conn: sa.Connection, plan: SubsetPlan
+    ) -> None:
         for table, query in plan.queries.items():
             if not query.materialize:
                 continue
             schema, table_name = parse_table_name(table)
-            table_obj = meta.tables[(schema, table_name)].table_obj
-
             LOGGER.info("Materializing sample for %s", table)
 
-            params: Dict[str, Any] = {}
+            ttbl = TemporaryTable(schema, table_name, query.build(meta))
             try:
-                ttbl = TemporaryTable(
-                    schema + "_tmp_subsetter_" + table_name,
-                    query.build(meta),
-                )
                 result = conn.execute(ttbl)
-                meta.temp_tables[(schema, table_name)] = ttbl.table_obj
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 # Some client/server combinations report a read-only error even though the temporary
                 # table creation actually succeeded. We'll just swallow the error here and if there
@@ -343,6 +334,7 @@ class Sampler:
                 if "--read-only" not in str(exc):
                     raise
             else:
+                meta.temp_tables[(schema, table_name)] = ttbl.table_obj
                 LOGGER.info(
                     "Materialized %d rows for %s.%s in temporary table",
                     result.rowcount,

@@ -116,9 +116,11 @@ class DatabaseMetadata:
             cls(
                 metadata_obj,
                 {
-                    (schema, table): TableMetadata(metadata_obj.tables[f"{schema}.{table}"])
+                    (schema, table): TableMetadata(
+                        metadata_obj.tables[f"{schema}.{table}"]
+                    )
                     for schema, table in table_queue
-                }
+                },
             ),
             table_queue[num_selected_tables:],
         )

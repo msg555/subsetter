@@ -1,13 +1,12 @@
-import logging
-import os
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Annotated
 
-from subsetter.sql_dialects import DatabaseDialect, SQLDialectEncoder
 from subsetter.metadata import DatabaseMetadata
+
+# pylint: disable=unused-argument
 
 
 class SQLTableIdentifier(BaseModel):
@@ -67,13 +66,13 @@ class SQLWhereClauseOperator(BaseModel):
         if op == ">":
             return column > self.value
         if op == "=":
-            return column == self.values
+            return column == self.value
         if op in ("<>", "!="):
-            return column != self.values
+            return column != self.value
         if op == "like":
-            return column.like(value)
+            return column.like(self.value)
         if op == "not like":
-            return not column.like(value)
+            return sa.not_(column.like(self.value))
         raise ValueError(f"Unknown operator {op!r}")
 
     def simplify(self) -> "SQLWhereClause":
@@ -89,16 +88,13 @@ class SQLWhereClauseIn(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     def build(self, meta: DatabaseMetadata, table_obj: sa.Table):
-        columns = sa.tuple_(*(
-            table_obj.columns[col_name]
-            for col_name in self.columns
-        ))
+        columns = sa.tuple_(*(table_obj.columns[col_name] for col_name in self.columns))
         if isinstance(self.values, list):
             clause = columns.in_(self.values)
         else:
             clause = columns.in_(self.values.build(meta))
         if self.negated:
-            clause = not clause
+            clause = sa.not_(clause)
         return clause
 
     def simplify(self) -> "SQLWhereClause":
@@ -121,9 +117,7 @@ class SQLWhereClauseAnd(BaseModel):
     def build(self, meta: DatabaseMetadata, table_obj: sa.Table):
         if not self.conditions:
             return sa.true()
-        return sa.and_(
-            *(cond.build(meta, table_obj) for cond in self.conditions)
-        )
+        return sa.and_(*(cond.build(meta, table_obj) for cond in self.conditions))
 
     def simplify(self) -> "SQLWhereClause":
         simp_conditions: List["SQLWhereClause"] = [
@@ -153,9 +147,7 @@ class SQLWhereClauseOr(BaseModel):
     def build(self, meta: DatabaseMetadata, table_obj: sa.Table):
         if not self.conditions:
             return sa.false()
-        return sa.or_(
-            *(cond.build(meta, table_obj) for cond in self.conditions)
-        )
+        return sa.or_(*(cond.build(meta, table_obj) for cond in self.conditions))
 
     def simplify(self) -> "SQLWhereClause":
         simp_conditions: List["SQLWhereClause"] = [
@@ -183,6 +175,7 @@ class SQLWhereClauseRandom(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     def build(self, meta: DatabaseMetadata, table_obj: sa.Table):
+        # pylint: disable=not-callable
         return sa.func.random() < self.threshold
 
     def simplify(self) -> "SQLWhereClause":
@@ -201,9 +194,9 @@ class SQLWhereClauseSQL(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     def build(self, meta: DatabaseMetadata, table_obj: sa.Table):
-        clause = sa.text(sql)
-        if self.sql_params:
-            clause = clause.bindparams(self.sql_params)
+        clause = sa.text(self.sql)
+        if self.sql_params is not None:
+            clause = clause.bindparams(**self.sql_params)
         return clause
 
     def simplify(self) -> "SQLWhereClause":
@@ -238,6 +231,7 @@ class SQLStatementSelect(BaseModel):
         table_obj = self.from_.build(meta)
 
         if self.columns:
+            # pylint: disable=not-an-iterable
             stmt = sa.select(*(table_obj.columns[column] for column in self.columns))
         else:
             stmt = sa.select(table_obj)
@@ -246,6 +240,7 @@ class SQLStatementSelect(BaseModel):
             stmt = stmt.where(self.where.build(meta, table_obj))
 
         if self.limit is not None:
+            # pylint: disable=not-callable
             stmt = stmt.order_by(sa.func.random()).limit(self.limit)
 
         return stmt
@@ -275,9 +270,7 @@ class SQLStatementUnion(BaseModel):
     # TODO: Assert statements is not empty
 
     def build(self, meta: DatabaseMetadata):
-        return sa.union(
-            *(statement.build(meta) for statement in self.statements)
-        )
+        return sa.union(*(statement.build(meta) for statement in self.statements))
 
     def simplify(self) -> "SQLStatement":
         simp_statements = [
@@ -338,8 +331,8 @@ class SQLTableQuery(BaseModel):
     def build(self, meta: DatabaseMetadata):
         if self.sql is not None:
             stmt = sa.text(self.sql)
-            if self.sql_params:
-                stmt = stmt.bindparams(self.sql_params)
+            if self.sql_params is not None:
+                stmt = stmt.bindparams(**self.sql_params)
             return stmt
         if self.statement is not None:
             return self.statement.build(meta)
