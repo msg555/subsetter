@@ -1,12 +1,11 @@
 import logging
-import os
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 from pydantic import BaseModel, Field
 
-from subsetter.common import (
-    DEFAULT_DIALECT,
-    DatabaseConfig,
+from subsetter.common import DatabaseConfig, parse_table_name
+from subsetter.metadata import DatabaseMetadata, ForeignKey, TableMetadata
+from subsetter.plan_model import (
     SQLKnownOperator,
     SQLLiteralType,
     SQLStatementSelect,
@@ -15,15 +14,14 @@ from subsetter.common import (
     SQLTableQuery,
     SQLWhereClause,
     SQLWhereClauseAnd,
+    SQLWhereClauseIn,
     SQLWhereClauseOperator,
     SQLWhereClauseOr,
     SQLWhereClauseRandom,
     SQLWhereClauseSQL,
-    parse_table_name,
+    SubsetPlan,
 )
-from subsetter.metadata import DatabaseMetadata, ForeignKey, TableMetadata
 from subsetter.solver import dfs, order_graph, reverse_graph, subgraph
-from subsetter.sql_dialects import SQLDialectEncoder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,29 +60,19 @@ class PlannerConfig(BaseModel):
     extra_fks: List[ExtraFKConfig] = []
     infer_foreign_keys: bool = False
     normalize_foreign_keys: bool = False
-    output_sql: bool = False
-
-
-class SubsetPlan(BaseModel):
-    queries: Dict[str, SQLTableQuery]
 
 
 class Planner:
     def __init__(self, config: PlannerConfig) -> None:
         self.config = config
         self.engine = self.config.source.database_engine(env_prefix="SUBSET_SOURCE_")
-        self.sql_enc = SQLDialectEncoder.from_dialect(
-            self.config.source.dialect
-            or os.getenv("SUBSET_SOURCE_DIALECT", "")  # type: ignore
-            or DEFAULT_DIALECT
-        )
         self.meta: DatabaseMetadata
         self.ignore_tables = {parse_table_name(table) for table in config.ignore}
         self.passthrough_tables = {
             parse_table_name(table) for table in config.passthrough
         }
 
-    def plan(self, output_sql: bool = False) -> SubsetPlan:
+    def plan(self) -> SubsetPlan:
         LOGGER.info("Scanning schema")
         meta, extra_tables = DatabaseMetadata.from_engine(
             self.engine,
@@ -140,17 +128,6 @@ class Planner:
                 remaining,
                 target=self.config.targets.get(table),
             )
-
-        if output_sql:
-            for table, query in queries.items():
-                if not query.statement:
-                    continue
-                sql_params: Dict[str, Any] = {}
-                queries[table] = SQLTableQuery(
-                    sql=query.statement.build(self.sql_enc, sql_params),
-                    sql_params=sql_params,
-                    materialize=query.materialize,
-                )
 
         return SubsetPlan(queries=queries)
 
@@ -289,9 +266,8 @@ class Planner:
 
             if not target or not target.all_:
                 fk_constraints.append(
-                    SQLWhereClauseOperator(
-                        type_="operator",
-                        operator="in",
+                    SQLWhereClauseIn(
+                        type_="in",
                         columns=list(fk.columns),
                         values=SQLStatementSelect(
                             type_="select",
@@ -309,14 +285,15 @@ class Planner:
             f"{table.schema}.{table.name}", []
         )
         conf_constraints_sql: List[SQLWhereClause] = []
+        all_columns = {column.name for column in table.table_obj.columns}
         for conf_constraint in conf_constraints:
-            if conf_constraint.column in table.columns:
+            if conf_constraint.column in all_columns:
                 conf_constraints_sql.append(
                     SQLWhereClauseOperator(
                         type_="operator",
                         operator=conf_constraint.operator,
-                        columns=[conf_constraint.column],
-                        values=conf_constraint.value,
+                        column=conf_constraint.column,
+                        value=conf_constraint.value,
                     )
                 )
 
@@ -367,8 +344,8 @@ class Planner:
                             SQLWhereClauseOperator(
                                 type_="operator",
                                 operator="like",
-                                columns=[column],
-                                values=pattern,
+                                column=column,
+                                value=pattern,
                             )
                             for pattern in patterns
                         ],
@@ -377,11 +354,10 @@ class Planner:
 
             for column, in_list in target.in_.items():
                 target_constraints.append(
-                    SQLWhereClauseOperator(
-                        type_="operator",
-                        operator="in",
+                    SQLWhereClauseIn(
+                        type_="in",
                         columns=[column],
-                        values=in_list,
+                        values=[in_list],
                     )
                 )
 

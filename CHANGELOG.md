@@ -3,6 +3,7 @@
 - Added support for remapping schema and table names in sampling phase
 - Patch support for JSON data types
 - Improve live database testing
+- Replaced a lot of custom dialect handling with sqlalchemy core api
 
 # v0.2.0
 

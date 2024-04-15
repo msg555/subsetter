@@ -23,10 +23,9 @@ expected_plan:
           schema: test
           table: users
         where:
-          type: operator
-          operator: in
+          type: in
           columns: [sample]
-          values: [1]
+          values: [[1]]
 
 expected_sample:
   test_out.users:

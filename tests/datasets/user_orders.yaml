@@ -43,8 +43,7 @@ expected_plan:
         where:
           columns:
           - order_id
-          operator: in
-          type: operator
+          type: in
           values:
             columns:
             - id
@@ -63,8 +62,7 @@ expected_plan:
         where:
           columns:
           - user_id
-          operator: in
-          type: operator
+          type: in
           values:
             columns:
             - id
@@ -81,10 +79,9 @@ expected_plan:
           schema: test
           table: users
         where:
-          type: operator
-          operator: in
+          type: in
           columns: [sample]
-          values: [1]
+          values: [[1]]
 
 expected_sample:
   test_out.users:

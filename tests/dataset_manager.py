@@ -6,16 +6,9 @@ import sqlalchemy as sa
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from subsetter.common import (
-    DEFAULT_DIALECT,
-    DatabaseConfig,
-    SQLStatementSelect,
-    SQLTableIdentifier,
-    parse_table_name,
-)
+from subsetter.common import DatabaseConfig, parse_table_name
 from subsetter.planner import Planner, PlannerConfig, SubsetPlan
 from subsetter.sampler import DatabaseOutputConfig, Sampler, SamplerConfig
-from subsetter.sql_dialects import SQLDialectEncoder
 
 DATASETS_BASE_PATH = os.path.join(os.path.dirname(__file__), "datasets")
 
@@ -87,8 +80,6 @@ def _col_spec(col: Union[str, ColumnDescriptor]) -> sa.Column:
 
 
 def apply_dataset(db_config: DatabaseConfig, config: TestDataset) -> None:
-    dialect = db_config.dialect or DEFAULT_DIALECT
-    sql_enc = SQLDialectEncoder.from_dialect(dialect)
     engine = sa.create_engine(db_config.database_url())
 
     schemas = set()
@@ -101,76 +92,29 @@ def apply_dataset(db_config: DatabaseConfig, config: TestDataset) -> None:
         schemas.add(schema + "_out")
 
     with engine.connect() as conn:
-        if db_config.dialect == "mysql":
-            for schema in schemas:
-                conn.execute(
-                    sa.text(f"DROP DATABASE IF EXISTS {sql_enc.identifier(schema)}")
-                )
-                conn.execute(sa.text(f"CREATE DATABASE {sql_enc.identifier(schema)}"))
-        if db_config.dialect == "postgres":
-            for schema in schemas:
-                conn.execute(
-                    sa.text(
-                        f"DROP SCHEMA IF EXISTS {sql_enc.identifier(schema)} CASCADE"
-                    )
-                )
-                conn.execute(sa.text(f"CREATE SCHEMA {sql_enc.identifier(schema)}"))
-
+        for schema in schemas:
+            try:
+                conn.execute(sa.schema.DropSchema(schema, cascade=True, if_exists=True))
+            except sa.exc.ProgrammingError:
+                conn.execute(sa.schema.DropSchema(schema, if_exists=True))
+            conn.execute(sa.schema.CreateSchema(schema))
         conn.commit()
 
     metadata.create_all(engine)
 
     with engine.connect() as conn:
         for table, rows in config.data.items():
-            schema, table_name = parse_table_name(table)
-            col_specs = [_col_spec(col) for col in config.tables[table].columns]
-            col_names = [col_spec.name for col_spec in col_specs]
-            for row in rows:
-                insert_row = tuple(
-                    json.dumps(col) if isinstance(col_spec.type, sa.JSON) else col
-                    for col_spec, col in zip(col_specs, row)
-                )
-                conn.execute(
-                    sa.text(
-                        f"INSERT INTO {sql_enc.table_name(schema, table_name)} "
-                        f"({sql_enc.column_list(col_names)}) VALUES :data"
-                    ),
-                    {
-                        "data": insert_row,
-                    },
-                )
+            conn.execute(sa.insert(metadata.tables[table]).values(rows))
 
         conn.commit()
 
 
-def get_rows(
-    db_config, config: TestDataset, schema: str, table: str
-) -> List[Dict[str, Any]]:
-    dialect = db_config.dialect or DEFAULT_DIALECT
-    sql_enc = SQLDialectEncoder.from_dialect(dialect)
-
-    col_types = [
-        _col_spec(col).type for col in config.tables[f"{schema[:-4]}.{table}"].columns
-    ]
-
+def get_rows(db_config, schema: str, table: str) -> List[Dict[str, Any]]:
     engine = sa.create_engine(db_config.database_url())
     with engine.connect() as conn:
-        stmt = SQLStatementSelect(
-            type_="select",
-            from_=SQLTableIdentifier(
-                table_schema=schema,
-                table_name=table,
-            ),
-        )
-        params: Dict[str, Any] = {}
-        sql = stmt.build(sql_enc, params)
-        result = conn.execute(sa.text(sql), params)
-        columns = list(result.keys())
-
-        return [
-            dict(zip(columns, row))
-            for row in sql_enc.result_processor(col_types, result)
-        ]
+        metadata_obj = sa.MetaData()
+        table_obj = sa.Table(table, metadata_obj, schema=schema, autoload_with=conn)
+        return [dict(row) for row in conn.execute(sa.select(table_obj)).mappings()]
 
 
 def do_dataset_test(db_config: DatabaseConfig, dataset_name: str) -> None:
@@ -215,7 +159,7 @@ def do_dataset_test(db_config: DatabaseConfig, dataset_name: str) -> None:
     sampler.sample(plan)
 
     sample = {
-        table: get_rows(db_config, test_config, *parse_table_name(table))
+        table: get_rows(db_config, *parse_table_name(table))
         for table in test_config.expected_sample
     }
 
