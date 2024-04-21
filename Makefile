@@ -27,7 +27,7 @@ test:
 
 .PHONY: test_all
 test_all:
-	$(PYTHON) -m pytest -sv tests/
+	$(PYTHON) -m pytest --cov subsetter -sv tests/
 
 .PHONY: build
 build:
