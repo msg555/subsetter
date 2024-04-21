@@ -8,5 +8,6 @@ types-psycopg2
 pylint_pydantic
 
 pytest ~= 8.1
+pytest-cov ~= 5.0
 pytest-mysql ~= 2.5
 pytest-postgresql ~= 6.0
