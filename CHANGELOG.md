@@ -1,9 +1,17 @@
-# v0.2.1
+# v0.3.0
 
 - Added support for remapping schema and table names in sampling phase
 - Patch support for JSON data types
 - Improve live database testing
 - Replaced a lot of custom dialect handling with sqlalchemy core api
+- Plan output no longer outputs if tables should be materialized. Sampler now
+  calculates if it needs to materialize a table itself.
+- Fixed significant bug in solver that prevented finding a valid plan in many
+  scenarios. Now planning will only fail if there is a forward cycle of foreign
+  keys.
+- Added support in mysql dialects for sampling across multiple foreign keys to
+  the sape table. Previously this would result in an error due to attempting to
+  reopen a temporary table which is not supported in mysql.
 
 # v0.2.0
 

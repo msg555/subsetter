@@ -240,7 +240,7 @@ def _main_plan(args):
                 stream=fplan,
                 default_flow_style=False,
                 width=2**20,
-                sort_keys=False,
+                sort_keys=True,
             )
     except IOError as exc:
         LOGGER.error(

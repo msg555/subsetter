@@ -1,4 +1,5 @@
 import abc
+import functools
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ from typing_extensions import Annotated
 from subsetter.common import DatabaseConfig, parse_table_name
 from subsetter.filters import FilterConfig, FilterView, FilterViewChain
 from subsetter.metadata import DatabaseMetadata
+from subsetter.plan_model import SQLTableIdentifier
 from subsetter.planner import SubsetPlan
 
 try:
@@ -35,14 +37,17 @@ class TemporaryTable(Executable, ClauseElement):
 
     TEMP_ID = "_tmp_subsetter_"
 
-    def __init__(self, schema: str, name: str, select: sa.Select) -> None:
+    def __init__(
+        self, schema: str, name: str, select: sa.Select, index: int = 0
+    ) -> None:
         self.schema = schema
         self.name = name
         self.select = select
+        self.index = index
         self.table_obj: sa.Table
 
     def _temporary_table_compile_generic(self, compiler, **_) -> str:
-        name = self.name + self.TEMP_ID
+        name = self.name + self.TEMP_ID + str(self.index)
         schema_enc = compiler.dialect.identifier_preparer.quote(self.schema)
         name_enc = compiler.dialect.identifier_preparer.quote(name)
         select_stmt = compiler.process(self.select)
@@ -59,7 +64,7 @@ class TemporaryTable(Executable, ClauseElement):
         Postgres creates temporary tables in a special schema. We make the table
         name incorporate the schema name to compensate and avoid collisions.
         """
-        name = self.schema + self.TEMP_ID + self.name
+        name = self.schema + self.TEMP_ID + f"{self.index}_" + self.name
         name_enc = compiler.dialect.identifier_preparer.quote(name)
         select_stmt = compiler.process(self.select)
         self.table_obj = sa.Table(
@@ -315,16 +320,48 @@ class Sampler:
                 output, conn, meta, plan, insert_order, table_column_multipliers
             )
 
+    def _tables_to_materialize(
+        self, meta: DatabaseMetadata, plan: SubsetPlan
+    ) -> Dict[Tuple[str, str], int]:
+        """
+        Find the set of tables that should be materialized. For each table that
+        needs to be materialized it calculates the maximum number of times that
+        table is referenced in one query.
+        """
+
+        def _record_sampled_tables(
+            counter: Dict[Tuple[str, str], int], ident: SQLTableIdentifier
+        ) -> sa.Table:
+            key = (ident.table_schema, ident.table_name)
+            if ident.sampled:
+                counter[key] = counter.get(key, 0) + 1
+            return meta.tables[key].table_obj
+
+        result: Dict[Tuple[str, str], int] = {}
+        for query in plan.queries.values():
+            counter: Dict[Tuple[str, str], int] = {}
+            query.build(functools.partial(_record_sampled_tables, counter))
+            for key, count in counter.items():
+                result[key] = max(result.get(key, 0), count)
+        return result
+
     def _materialize_tables(
-        self, meta: DatabaseMetadata, conn: sa.Connection, plan: SubsetPlan
+        self,
+        meta: DatabaseMetadata,
+        conn: sa.Connection,
+        plan: SubsetPlan,
     ) -> None:
+        materialized_tables = self._tables_to_materialize(meta, plan)
         for table, query in plan.queries.items():
-            if not query.materialize:
-                continue
             schema, table_name = parse_table_name(table)
+            if (schema, table_name) not in materialized_tables:
+                continue
+
             LOGGER.info("Materializing sample for %s", table)
 
-            ttbl = TemporaryTable(schema, table_name, query.build(meta))
+            ttbl = TemporaryTable(
+                schema, table_name, query.build(meta.sql_build_context())
+            )
             try:
                 result = conn.execute(ttbl)
             except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -334,13 +371,35 @@ class Sampler:
                 if "--read-only" not in str(exc):
                     raise
             else:
-                meta.temp_tables[(schema, table_name)] = ttbl.table_obj
+                meta.temp_tables[(schema, table_name, 0)] = ttbl.table_obj
                 LOGGER.info(
                     "Materialized %d rows for %s.%s in temporary table",
                     result.rowcount,
                     schema,
                     table_name,
                 )
+
+            if meta.supports_temp_reopen:
+                continue
+
+            # Create additional copies of the temporary table if needed. This is
+            # to work around an issue on mysql with reopening temporary tables.
+            for index in range(1, materialized_tables[(schema, table_name)]):
+                ttbl_copy = TemporaryTable(
+                    schema, table_name, sa.select(ttbl.table_obj), index=index
+                )
+                try:
+                    result = conn.execute(ttbl_copy)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    if "--read-only" not in str(exc):
+                        raise
+                else:
+                    meta.temp_tables[(schema, table_name, index)] = ttbl_copy.table_obj
+                    LOGGER.info(
+                        "Copied materialization of %s.%s",
+                        schema,
+                        table_name,
+                    )
 
     def _copy_results(
         self,
@@ -360,10 +419,10 @@ class Sampler:
 
             LOGGER.info("Sampling %s.%s ...", schema, table_name)
 
-            if query.materialize:
-                query_stmt = sa.select(meta.temp_tables[(schema, table_name)])
+            if (schema, table_name, 0) in meta.temp_tables:
+                query_stmt = sa.select(meta.temp_tables[(schema, table_name, 0)])
             else:
-                query_stmt = query.build(meta)
+                query_stmt = query.build(meta.sql_build_context())
 
             LOGGER.info("Sampling with query %r", query_stmt)
             result = conn.execution_options(

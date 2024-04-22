@@ -64,3 +64,8 @@ def test_user_orders(db_config):
 @pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
 def test_data_types(db_config):
     do_dataset_test(db_config, "data_types")
+
+
+@pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
+def test_fk_chain(db_config):
+    do_dataset_test(db_config, "fk_chain")
