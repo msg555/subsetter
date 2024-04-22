@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, TextIO, Tuple
 import sqlalchemy as sa
 
 from subsetter.common import parse_table_name
+from subsetter.plan_model import SQLTableIdentifier
 from subsetter.solver import reverse_graph
 
 LOGGER = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ LOGGER = logging.getLogger(__name__)
 # pylint: disable=modified-iterating-list
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, order=True)
 class ForeignKey:
     columns: Tuple[str, ...]
     dst_schema: str
@@ -59,10 +60,13 @@ class DatabaseMetadata:
         self,
         metadata_obj: sa.MetaData,
         tables: Dict[Tuple[str, str], TableMetadata],
+        *,
+        supports_temp_reopen: bool = True,
     ) -> None:
         self.metadata_obj = metadata_obj
         self.tables = tables
-        self.temp_tables: Dict[Tuple[str, str], sa.Table] = {}
+        self.supports_temp_reopen = supports_temp_reopen
+        self.temp_tables: Dict[Tuple[str, str, int], sa.Table] = {}
 
     @classmethod
     def from_engine(
@@ -121,6 +125,7 @@ class DatabaseMetadata:
                     )
                     for schema, table in table_queue
                 },
+                supports_temp_reopen=engine.dialect.name != "mysql",
             ),
             table_queue[num_selected_tables:],
         )
@@ -222,19 +227,36 @@ class DatabaseMetadata:
 
     def as_graph(
         self, *, ignore_tables: Optional[Set[Tuple[str, str]]] = None
-    ) -> Dict[str, List[str]]:
+    ) -> Dict[str, Set[str]]:
         if ignore_tables is None:
             ignore_tables = set()
         return {
-            f"{table.schema}.{table.name}": [
+            f"{table.schema}.{table.name}": {
                 f"{fk.dst_schema}.{fk.dst_table}"
                 for fk in table.foreign_keys
                 if (fk.dst_schema, fk.dst_table) not in ignore_tables
                 and (fk.dst_schema, fk.dst_table) in self.tables
-            ]
+            }
             for table in self.tables.values()
             if (table.schema, table.name) not in ignore_tables
         }
+
+    def sql_build_context(self):
+        reference_count = {}
+
+        def _context(ident: SQLTableIdentifier) -> sa.Table:
+            if ident.sampled:
+                if self.supports_temp_reopen:
+                    index = 0
+                else:
+                    index = reference_count.get(
+                        (ident.table_schema, ident.table_name), 0
+                    )
+                    reference_count[(ident.table_schema, ident.table_name)] = index + 1
+                return self.temp_tables[(ident.table_schema, ident.table_name, index)]
+            return self.tables[(ident.table_schema, ident.table_name)].table_obj
+
+        return _context
 
     def output_graphviz(self, fout: TextIO) -> None:
         def _dot_label(lbl: TableMetadata) -> str:

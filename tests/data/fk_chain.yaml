@@ -1,0 +1,268 @@
+dataset: fk_chain
+
+plan_config:
+  targets:
+    test.friends:
+      in:
+        sample: [1]
+  select:
+  - test.*
+
+sample_config: {}
+
+expected_plan:
+  queries:
+    test.bookmark:
+      statement:
+        from:
+          schema: test
+          table: bookmark
+        type: select
+        where:
+          columns:
+          - user_id
+          negated: false
+          type: in
+          values:
+            columns:
+            - id
+            from:
+              sampled: true
+              schema: test
+              table: users
+            type: select
+    test.friends:
+      statement:
+        from:
+          schema: test
+          table: friends
+        type: select
+        where:
+          columns:
+          - sample
+          type: in
+          values:
+          - - 1
+    test.referal_owners:
+      statement:
+        from:
+          schema: test
+          table: referal_owners
+        type: select
+        where:
+          conditions:
+          - columns:
+            - referal_id
+            negated: false
+            type: in
+            values:
+              columns:
+              - id
+              from:
+                sampled: true
+                schema: test
+                table: referals
+              type: select
+          - columns:
+            - source_website_id
+            negated: false
+            type: in
+            values:
+              columns:
+              - id
+              from:
+                sampled: true
+                schema: test
+                table: websites
+              type: select
+          type: and
+    test.referals:
+      statement:
+        from:
+          schema: test
+          table: referals
+        type: select
+        where:
+          columns:
+          - website_id
+          negated: false
+          type: in
+          values:
+            columns:
+            - id
+            from:
+              sampled: true
+              schema: test
+              table: websites
+            type: select
+    test.users:
+      statement:
+        from:
+          schema: test
+          table: users
+        type: select
+        where:
+          conditions:
+          - columns:
+            - id
+            negated: false
+            type: in
+            values:
+              columns:
+              - friend_a
+              from:
+                sampled: true
+                schema: test
+                table: friends
+              type: select
+          - columns:
+            - id
+            negated: false
+            type: in
+            values:
+              columns:
+              - friend_b
+              from:
+                sampled: true
+                schema: test
+                table: friends
+              type: select
+          type: or
+    test.visits:
+      statement:
+        from:
+          schema: test
+          table: visits
+        type: select
+        where:
+          columns:
+          - user_id
+          negated: false
+          type: in
+          values:
+            columns:
+            - id
+            from:
+              sampled: true
+              schema: test
+              table: users
+            type: select
+    test.websites:
+      statement:
+        from:
+          schema: test
+          table: websites
+        type: select
+        where:
+          conditions:
+          - columns:
+            - id
+            negated: false
+            type: in
+            values:
+              columns:
+              - website_id
+              from:
+                sampled: true
+                schema: test
+                table: bookmark
+              type: select
+          - columns:
+            - id
+            negated: false
+            type: in
+            values:
+              columns:
+              - website_id
+              from:
+                sampled: true
+                schema: test
+                table: visits
+              type: select
+          type: or
+
+expected_sample:
+  test_out.users:
+  - id: 1
+    name: john
+  - id: 2
+    name: peter
+  - id: 4
+    name: julia
+  - id: 5
+    name: ashley
+  - id: 6
+    name: daniel
+  test_out.websites:
+  - id: 1
+    url: web1
+  - id: 2
+    url: web2
+  - id: 4
+    url: web4
+  - id: 6
+    url: web6
+  - id: 9
+    url: web9
+  test_out.referals:
+  - count: 13
+    id: 1
+    website_id: 1
+  - count: 18
+    id: 2
+    website_id: 1
+  - count: 99
+    id: 3
+    website_id: 2
+  - count: 15
+    id: 4
+    website_id: 2
+  - count: 7
+    id: 5
+    website_id: 4
+  - count: 2
+    id: 10
+    website_id: 9
+  test_out.referal_owners:
+  - id: 1
+    referal_id: 1
+    source_website_id: 1
+  - id: 5
+    referal_id: 10
+    source_website_id: 9
+  test_out.friends:
+  - friend_a: 1
+    friend_b: 2
+    id: 1
+    sample: 1
+  - friend_a: 4
+    friend_b: 5
+    id: 3
+    sample: 1
+  - friend_a: 4
+    friend_b: 6
+    id: 4
+    sample: 1
+  test_out.bookmark:
+  - id: 1
+    user_id: 1
+    website_id: 1
+  - id: 2
+    user_id: 2
+    website_id: 2
+  - id: 4
+    user_id: 5
+    website_id: 4
+  test_out.visits:
+  - count: 10
+    id: 1
+    user_id: 1
+    website_id: 9
+  - count: 100
+    id: 4
+    user_id: 4
+    website_id: 6
+  - count: 555
+    id: 5
+    user_id: 5
+    website_id: 2

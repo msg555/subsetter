@@ -1,161 +1,143 @@
-import copy
-import json
 import logging
-from typing import Dict, List, Optional, Set, TypeVar
+from typing import Dict, Iterator, List, Set, Tuple, TypeVar
 
 NodeT = TypeVar("NodeT")
-GraphT = Dict[NodeT, List[NodeT]]
+GraphT = Dict[NodeT, Set[NodeT]]
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-class InversionException(Exception):
-    pass
+class SolverException(ValueError):
+    """
+    Raised if no solution can be found when ordering a graph.
+    """
 
 
-def dfs(
+class CycleException(SolverException):
+    def __init__(self, cycle: List[NodeT]) -> None:
+        super().__init__(f"Cannot solve due to cycle {cycle}")
+        self.cycle = cycle
+
+
+def toposort_forward(
     G: GraphT,
     u: NodeT,
-    *,
-    visited: Optional[Dict[NodeT, int]] = None,
-    avoid: Optional[Set[NodeT]] = None,
-    color: int = 0,
-) -> int:
-    if visited is None:
-        visited = {}
-    if u in visited or (avoid and u in avoid):
-        return 0
-    visited[u] = color
+) -> List[NodeT]:
+    """
+    Returns either a topological sort of nodes reachable through forward edges
+    from `u` or raises a CycleException if a cycle is detected.
+    """
 
-    result = 1
-    for v in G[u]:
-        result += dfs(G, v, visited=visited, avoid=avoid, color=color)
-    return result
+    weight: Dict[NodeT, int] = {u: 1}
+    on_stk: Set[NodeT] = {u}
+    stk: List[Tuple[NodeT, Iterator[NodeT]]] = [(u, iter(G[u]))]
 
+    while stk:
+        u, it = stk[-1]
+        try:
+            v = next(it)
+            if v in on_stk:
+                cyc = []
+                for w, _ in reversed(stk):
+                    cyc.append(w)
+                    if w == v:
+                        break
+                raise CycleException(cyc[::-1])
+            if v in weight:
+                weight[u] += weight[v]
+            else:
+                weight[v] = 1
+                on_stk.add(v)
+                stk.append((v, iter(G[v])))
+        except StopIteration:
+            stk.pop()
+            on_stk.remove(u)
+            if stk:
+                weight[stk[-1][0]] += weight[u]
+            continue
 
-def subgraph(G: GraphT, nodes: Set[NodeT], *, invert: bool = False) -> GraphT:
-    G_sub = {}
-    for u, edges in G.items():
-        if (u in nodes) != invert:
-            G_sub[u] = [v for v in edges if (v in nodes) != invert]
-    return G_sub
+    return [
+        x[0] for x in sorted(weight.items(), key=lambda x: (x[1], x[0]), reverse=True)
+    ]
 
 
 def reverse_graph(G: GraphT, *, union=False) -> GraphT:
-    RG = {u: (list(edges) if union else []) for u, edges in G.items()}
+    """
+    Constructs the reverse graph of `G` where edges are oriented in the
+    opposite direction.
+
+    If `union` is True it will union of the forward and reverse graph so
+    that each edge becomes two edges in the resulting graph.
+    """
+    RG = {u: (set(edges) if union else set()) for u, edges in G.items()}
     for u, edges in G.items():
         for v in edges:
-            RG[v].append(u)
+            RG[v].add(u)
     return RG
 
 
-def invert_edges_into(G: GraphT, u: NodeT) -> GraphT:
-    G = copy.deepcopy(G)
+def order_graph(G: GraphT, source: NodeT) -> List[NodeT]:
+    """
+    Will return a ordering of the graph that is suitable for sampling
+    given the foreign key dependencies represented in G. Only nodes that are weakly
+    reachable from `source` will be included in the ordering.
+
+    The ordering will satisfy the following properties:
+    - `source` will be first
+    - For every `u`
+      - let `f_u` be # of `v` such that `v` -> `u` in G and `v` is ordered before `u`
+      - let `b_u` be # of `v` such that `u` -> `v` in G and `v` is ordered before `u`
+      - Then either `f_u` = 0 or `b_u` = 0
+      - This ensures `u` can be sampled by taking either the union of several forward
+        relationships `v`->`u` or the intersection of several backwards relationships
+        `u`->`v`.
+
+    Raises CycleException if no solution can be found.
+    """
+    # Algorithm approach:
+    #   Let `H` be the subgraph of nodes strongly reachable from `source`
+    #
+    #   Begin resulting ordering with any topological sort of `H`
+    #
+    #   Delete all edges in `H` from `G`
+    #
+    #   For each node `u` in `H`
+    #     Find `S_u` as all nodes strongly reachable in the reversed graph of `G` from `u`
+    #     Reverse all edges between two nodes in `S_u` in `G`
+    #     Recursively solve rooted at `u` and append ordering, omitting `u` from the start
+
+    # Copy G's graph structure so we can mutate it
+    G = {u: set(edges) for u, edges in G.items()}
     RG = reverse_graph(G)
-    parent: Dict[NodeT, Optional[NodeT]] = {}
 
-    def invert_dfs(u: NodeT, *, p: Optional[NodeT] = None) -> None:
-        if u in parent:
-            path_u = []
-            u_link: Optional[NodeT] = u
-            while u_link is not None:
-                path_u.append(u_link)
-                u_link = parent[u_link]
+    result = [source]
 
-            path_p = [u]
-            u_link = p
-            while u_link is not None:
-                path_p.append(u_link)
-                u_link = parent[u_link]
+    q = [source]
+    for u in q:
+        if not G[u]:
+            # Invert all edges reachable from u by only backward edges
+            edges: Set[NodeT] = set()
+            for v in toposort_forward(RG, u):
+                for w in G[v] & edges:
+                    G[v].remove(w)
+                    RG[v].add(w)
+                    G[w].add(v)
+                    RG[w].remove(v)
+                edges.add(v)
 
-            while len(path_u) > 1 and path_u[-2:] == path_p[-2:]:
-                path_p.pop()
-                path_u.pop()
+        order = toposort_forward(G, u)
+        result.extend(order[1:])
 
-            raise InversionException(
-                f"Inverting edges creates cycle: {'->'.join(str(u) for u in path_u)} and {'->'.join(str(u) for u in path_p)}"
-            )
-        parent[u] = p
-        G[u] = [v for v in G[u] if v not in parent]
-        G[u].extend(RG[u])
-        for v in RG[u]:
-            invert_dfs(v, p=u)
+        # Remove all edges between nodes that have been ordered
+        nodes = set(order)
+        for v in nodes:
+            G[v] -= nodes
+            RG[v] -= nodes
 
-    invert_dfs(u)
-    return G
+        # Recursively solve remaining parts of graph that point into the set of nodes
+        # we just solved.
+        assert not RG[u]
+        q.extend(v for v in order[1:] if RG[v])
 
-
-def order_graph(G: Dict[NodeT, List[NodeT]], source: NodeT) -> List[NodeT]:
-    # Proposed algorithm
-    #   If only super-source remains we're done
-    #
-    #   Find any sink node u
-    #      If deleting u does not disconnect the undirected graph, delete u and solve recursively.
-    #      Place u last.
-    #
-    #      Otherwise recursively solve on graph reachable from super source. Place u. Reverse edges
-    #      up from u, bail if a cycle found. Solve on remaining graph treating u as new
-    #      super-source.
-
-    # Base case, graph only contains the source node which doesn't get placed.
-    if len(G) <= 1:
-        return []
-
-    G_uni = reverse_graph(G, union=True)
-
-    # Look for a simple pivot first. Sink that does not disconnect.
-    for u, edges in G.items():
-        if edges:
-            continue
-        assert u is not source
-
-        # Check if removing u disconnects G, if not pivot on it.
-        amt = dfs(G_uni, source, avoid={u})
-        if amt + 1 == len(G):
-            order = order_graph(subgraph(G, {u}, invert=True), source)
-            order.append(u)
-            return order
-
-    # Otherwise we know we'll need to pivot on a node that disconnects the graph.
-    options = set()
-    for u, edges in G.items():
-        if edges:
-            continue
-        assert u is not source
-
-        options.add(u)
-
-        # Find all nodes still reachable from source
-        visited: Dict[NodeT, int] = {}
-        dfs(G_uni, source, visited=visited, avoid={u})
-
-        # Find remaining subgraph and attempt to invert edges
-        G_rem = subgraph(G, set(visited), invert=True)
-
-        try:
-            G_rem = invert_edges_into(G_rem, u)
-        except InversionException:
-            LOGGER.exception("Attempted to pivot on %s but failed", u)
-        else:
-            order = order_graph(subgraph(G, set(visited)), source)
-            order.append(u)
-            order.extend(order_graph(G_rem, u))
-            return order
-
-    raise ValueError(f"Could not find sink to pivot on, options {options}")
-
-
-def main():
-    with open("graph.json", "r", encoding="utf-8") as fgraph:
-        graph = json.load(fgraph)
-
-    visited = {}
-    dfs(reverse_graph(graph, union=True), "", visited=visited)
-    graph = subgraph(graph, set(visited))
-
-    print(order_graph(graph, ""))
-
-
-if __name__ == "__main__":
-    main()
+    return result

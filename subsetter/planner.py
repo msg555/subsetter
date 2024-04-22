@@ -21,7 +21,7 @@ from subsetter.plan_model import (
     SQLWhereClauseSQL,
     SubsetPlan,
 )
-from subsetter.solver import dfs, order_graph, reverse_graph, subgraph
+from subsetter.solver import order_graph
 
 LOGGER = logging.getLogger(__name__)
 
@@ -117,15 +117,12 @@ class Planner:
             )
 
         processed = set()
-        remaining = {parse_table_name(table) for table in order}
         for table in order:
             schema, table_name = parse_table_name(table)
             processed.add((schema, table_name))
-            remaining.remove((schema, table_name))
             queries[table] = self._plan_table(
                 self.meta.tables[(schema, table_name)],
                 processed,
-                remaining,
                 target=self.config.targets.get(table),
             )
 
@@ -140,18 +137,17 @@ class Planner:
         graph = self.meta.as_graph(
             ignore_tables=self.passthrough_tables | self.ignore_tables
         )
-        graph[source] = list(self.config.targets)
+        graph[source] = set(self.config.targets)
+        order = order_graph(graph, source)[1:]
 
-        visited: Dict[str, int] = {}
-        dfs(reverse_graph(graph, union=True), source, visited=visited)
-        for u in graph:
-            if u not in visited:
+        order_st = set(order)
+        for table in graph:
+            if table and table not in order_st:
                 LOGGER.warning(
-                    "warning: no relationship found to %s, ignoring table", u
+                    "warning: no relationship found to %s, ignoring table", table
                 )
-        graph = subgraph(graph, set(visited))
 
-        return order_graph(graph, source)
+        return order
 
     def _add_extra_fks(self) -> None:
         """Add in additional foreign keys requested."""
@@ -248,38 +244,56 @@ class Planner:
         self,
         table: TableMetadata,
         processed: Set[Tuple[str, str]],
-        remaining: Set[Tuple[str, str]],
         target: Optional[PlannerConfig.TargetConfig] = None,
     ) -> SQLTableQuery:
-        materialize = False
         fk_constraints: List[SQLWhereClause] = []
-        for fk in table.foreign_keys + table.rev_foreign_keys:
-            dst_key = (fk.dst_schema, fk.dst_table)
-            if dst_key not in processed:
-                if dst_key in remaining:
-                    dst_target = self.config.targets.get(
-                        f"{fk.dst_schema}.{fk.dst_table}"
-                    )
-                    if not dst_target or not dst_target.all_:
-                        materialize = True
-                continue
 
-            if not target or not target.all_:
-                fk_constraints.append(
-                    SQLWhereClauseIn(
-                        type_="in",
-                        columns=list(fk.columns),
-                        values=SQLStatementSelect(
-                            type_="select",
-                            columns=list(fk.dst_columns),
-                            from_=SQLTableIdentifier(
-                                table_schema=fk.dst_schema,
-                                table_name=fk.dst_table,
-                                sampled=True,
-                            ),
-                        ),
-                    )
-                )
+        foreign_keys = sorted(
+            fk
+            for fk in table.foreign_keys
+            if (fk.dst_schema, fk.dst_table) in processed
+        )
+        rev_foreign_keys = sorted(
+            fk
+            for fk in table.rev_foreign_keys
+            if (fk.dst_schema, fk.dst_table) in processed
+        )
+
+        # Make sure the solver gave us something reasonable
+        assert not foreign_keys or not rev_foreign_keys
+        if target:
+            assert not foreign_keys
+            if target.all_:
+                rev_foreign_keys.clear()
+
+        fk_constraints = [
+            SQLWhereClauseIn(
+                type_="in",
+                columns=list(fk.columns),
+                values=SQLStatementSelect(
+                    type_="select",
+                    columns=list(fk.dst_columns),
+                    from_=SQLTableIdentifier(
+                        table_schema=fk.dst_schema,
+                        table_name=fk.dst_table,
+                        sampled=True,
+                    ),
+                ),
+            )
+            for fk in foreign_keys or rev_foreign_keys
+        ]
+
+        fk_constraint: SQLWhereClause
+        if foreign_keys:
+            fk_constraint = SQLWhereClauseAnd(
+                type_="and",
+                conditions=fk_constraints,
+            )
+        else:
+            fk_constraint = SQLWhereClauseOr(
+                type_="or",
+                conditions=fk_constraints,
+            )
 
         conf_constraints = self.config.table_constraints.get(
             f"{table.schema}.{table.name}", []
@@ -309,10 +323,7 @@ class Planner:
                     type_="and",
                     conditions=[
                         *conf_constraints_sql,
-                        SQLWhereClauseOr(
-                            type_="or",
-                            conditions=fk_constraints,
-                        ),
+                        fk_constraint,
                     ],
                 ),
             )
@@ -380,6 +391,5 @@ class Planner:
             statement=SQLStatementUnion(
                 type_="union",
                 statements=statements,
-            ).simplify(),
-            materialize=materialize,
+            ).simplify()
         )
