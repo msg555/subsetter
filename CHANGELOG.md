@@ -10,7 +10,7 @@
   scenarios. Now planning will only fail if there is a forward cycle of foreign
   keys.
 - Added support in mysql dialects for sampling across multiple foreign keys to
-  the sape table. Previously this would result in an error due to attempting to
+  the same table. Previously this would result in an error due to attempting to
   reopen a temporary table which is not supported in mysql.
 
 # v0.2.0
