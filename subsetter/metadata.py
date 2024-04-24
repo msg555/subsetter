@@ -8,7 +8,7 @@ import sqlalchemy as sa
 
 from subsetter.common import parse_table_name
 from subsetter.plan_model import SQLTableIdentifier
-from subsetter.solver import reverse_graph
+from subsetter.solver import toposort
 
 LOGGER = logging.getLogger(__name__)
 
@@ -194,24 +194,9 @@ class DatabaseMetadata:
             table.foreign_keys = fk_out
 
     def toposort(self) -> List[TableMetadata]:
-        graph = self.as_graph()
-        graph_rev = reverse_graph(graph)
-        deg = {u: set(edges) for u, edges in graph.items()}
-        order = []
-
-        for u, edges in deg.items():
-            if not edges:
-                order.append(u)
-
-        for u in order:
-            for v in graph_rev[u]:
-                deg[v].discard(u)
-                if not deg[v]:
-                    order.append(v)
-
-        if len(order) < len(graph):
-            raise ValueError("Cycle detected in schema graph")
-        return [self.tables[parse_table_name(u)] for u in order]
+        return [  # type: ignore
+            self.tables[parse_table_name(u)] for u in toposort(self.as_graph())
+        ]
 
     def compute_reverse_keys(self) -> None:
         for table in self.tables.values():
