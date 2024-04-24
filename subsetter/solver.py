@@ -20,6 +20,35 @@ class CycleException(SolverException):
         self.cycle = cycle
 
 
+def toposort(G: GraphT) -> List[NodeT]:
+    """
+    Returns a topological sort such that each node will appear in the ordering
+    after all nodes reachable from it.
+
+    Raises ValueError if there are cycles in the graph.
+    """
+
+    q = []
+    for u, edges in G.items():
+        if not edges:
+            q.append(u)
+
+    RG = reverse_graph(G)
+    deg = {u: len(edges) for u, edges in G.items()}
+    for u in q:
+        for v in RG[u]:
+            deg[v] -= 1
+            if not deg[v]:
+                # This is intended and well-defined behavior
+                # pylint: disable=modified-iterating-list
+                q.append(v)
+
+    if len(q) < len(G):
+        raise ValueError("Cycle detected in graph")
+
+    return q
+
+
 def toposort_forward(
     G: GraphT,
     u: NodeT,

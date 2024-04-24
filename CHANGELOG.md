@@ -12,6 +12,7 @@
 - Added support in mysql dialects for sampling across multiple foreign keys to
   the same table. Previously this would result in an error due to attempting to
   reopen a temporary table which is not supported in mysql.
+- Ordering of tables in the produced plan no longer matters
 
 # v0.2.0
 

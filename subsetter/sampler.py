@@ -17,6 +17,7 @@ from subsetter.filters import FilterConfig, FilterView, FilterViewChain
 from subsetter.metadata import DatabaseMetadata
 from subsetter.plan_model import SQLTableIdentifier
 from subsetter.planner import SubsetPlan
+from subsetter.solver import toposort
 
 try:
     from tqdm import tqdm  # type: ignore
@@ -320,13 +321,13 @@ class Sampler:
                 output, conn, meta, plan, insert_order, table_column_multipliers
             )
 
-    def _tables_to_materialize(
+    def _materialization_order(
         self, meta: DatabaseMetadata, plan: SubsetPlan
-    ) -> Dict[Tuple[str, str], int]:
+    ) -> List[Tuple[str, str, int]]:
         """
-        Find the set of tables that should be materialized. For each table that
-        needs to be materialized it calculates the maximum number of times that
-        table is referenced in one query.
+        Returns a list of tables that need to materialized. This list is a tuple
+        of the form (schema, table, max_ref_count). Some dialects (i.e. mysql) require
+        making multiple copies of a temp table if they are referenced multiple times.
         """
 
         def _record_sampled_tables(
@@ -337,13 +338,21 @@ class Sampler:
                 counter[key] = counter.get(key, 0) + 1
             return meta.tables[key].table_obj
 
-        result: Dict[Tuple[str, str], int] = {}
-        for query in plan.queries.values():
+        dep_graph: Dict[Tuple[str, str], Set[Tuple[str, str]]] = {}
+        max_ref_counts: Dict[Tuple[str, str], int] = {}
+        for table, query in plan.queries.items():
             counter: Dict[Tuple[str, str], int] = {}
             query.build(functools.partial(_record_sampled_tables, counter))
             for key, count in counter.items():
-                result[key] = max(result.get(key, 0), count)
-        return result
+                max_ref_counts[key] = max(max_ref_counts.get(key, 0), count)
+            dep_graph[parse_table_name(table)] = set(counter.keys())
+
+        order: List[Tuple[str, str]] = toposort(dep_graph)
+        return [
+            (schema, table_name, max_ref_counts[(schema, table_name)])
+            for schema, table_name in order
+            if (schema, table_name) in max_ref_counts
+        ]
 
     def _materialize_tables(
         self,
@@ -351,14 +360,11 @@ class Sampler:
         conn: sa.Connection,
         plan: SubsetPlan,
     ) -> None:
-        materialized_tables = self._tables_to_materialize(meta, plan)
-        for table, query in plan.queries.items():
-            schema, table_name = parse_table_name(table)
-            if (schema, table_name) not in materialized_tables:
-                continue
+        materialization_order = self._materialization_order(meta, plan)
+        for schema, table_name, ref_count in materialization_order:
+            LOGGER.info("Materializing sample for %s.%s", schema, table_name)
 
-            LOGGER.info("Materializing sample for %s", table)
-
+            query = plan.queries[f"{schema}.{table_name}"]
             ttbl = TemporaryTable(
                 schema, table_name, query.build(meta.sql_build_context())
             )
@@ -384,7 +390,7 @@ class Sampler:
 
             # Create additional copies of the temporary table if needed. This is
             # to work around an issue on mysql with reopening temporary tables.
-            for index in range(1, materialized_tables[(schema, table_name)]):
+            for index in range(1, ref_count):
                 ttbl_copy = TemporaryTable(
                     schema, table_name, sa.select(ttbl.table_obj), index=index
                 )

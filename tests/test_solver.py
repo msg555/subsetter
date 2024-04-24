@@ -1,7 +1,10 @@
+import pytest
+
 from subsetter.solver import (
     CycleException,
     order_graph,
     reverse_graph,
+    toposort,
     toposort_forward,
 )
 
@@ -104,3 +107,35 @@ def test_order_graph_deep():
         G[2 * i + 1].add(2 * i)
         G[2 * i + 1].add(2 * i + 2)
     assert order_graph(G, 0) == list(range(N))
+
+
+def test_toposort():
+    G = {
+        "a": set("bcd"),
+        "b": set(),
+        "e": set(),
+        "c": set("e"),
+        "d": set("c"),
+    }
+    order = toposort(G)
+    assert_valid_sort(reverse_graph(G), set(G), order)
+
+    G = {
+        "a": set("bcde"),
+        "b": set("cde"),
+        "c": set("de"),
+        "d": set("e"),
+        "e": set(),
+    }
+    order = toposort(G)
+    assert order == list("edcba")
+
+    G = {
+        "a": set("bcde"),
+        "b": set("cde"),
+        "c": set("de"),
+        "d": set("e"),
+        "e": set("a"),
+    }
+    with pytest.raises(ValueError):
+        toposort(G)
