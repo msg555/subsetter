@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import sqlalchemy as sa
 import yaml
@@ -17,6 +17,7 @@ DATASET_BASE_PATH = os.path.join(DATA_BASE_PATH, "datasets")
 class ColumnDescriptor(BaseModel):
     name: str
     type_: str = Field("int", alias="type")
+    gen: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -72,18 +73,24 @@ def _col_spec(col: Union[str, ColumnDescriptor]) -> sa.Column:
     if isinstance(col, ColumnDescriptor):
         col_desc = col
     else:
-        col_parts = col.split("|", 1)
+        col_parts = col.split("|")
         col_desc = ColumnDescriptor(
             name=col_parts[0],
             type_=col_parts[1] if len(col_parts) > 1 else "int",
+            gen=col_parts[2] if len(col_parts) > 2 else None,
         )
+    sa_type: Any
     if col_desc.type_ == "str":
-        return sa.Column(col_desc.name, sa.Text)
-    if col_desc.type_ == "int":
-        return sa.Column(col_desc.name, sa.Integer)
-    if col_desc.type_ == "json":
-        return sa.Column(col_desc.name, sa.JSON)
-    raise ValueError(f"Unknown type {col_desc.type_}")
+        sa_type = sa.Text
+    elif col_desc.type_ == "int":
+        sa_type = sa.Integer
+    elif col_desc.type_ == "json":
+        sa_type = sa.JSON
+    else:
+        raise ValueError(f"Unknown type {col_desc.type_}")
+    if col_desc.gen:
+        return sa.Column(col_desc.name, sa_type, sa.Computed(col_desc.gen))
+    return sa.Column(col_desc.name, sa_type)
 
 
 def apply_dataset(db_config: DatabaseConfig, dataset: TestDataset) -> None:

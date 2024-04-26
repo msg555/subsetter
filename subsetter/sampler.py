@@ -13,7 +13,7 @@ from sqlalchemy.sql.expression import ClauseElement, Executable
 from typing_extensions import Annotated
 
 from subsetter.common import DatabaseConfig, parse_table_name
-from subsetter.filters import FilterConfig, FilterView, FilterViewChain
+from subsetter.filters import FilterConfig, FilterOmit, FilterView, FilterViewChain
 from subsetter.metadata import DatabaseMetadata
 from subsetter.plan_model import SQLTableIdentifier
 from subsetter.planner import SubsetPlan
@@ -259,16 +259,33 @@ class DatabaseOutput(SamplerOutput):
         multiplier: int = 1,
         column_multipliers: Optional[Set[str]] = None,
     ) -> None:
+        schema, table_name = self._remap_table(schema, table_name)
+        table = self.meta.tables[(schema, table_name)]
+
+        # Automatically omit any included computed columns
         columns_out = filter_view.columns_out if filter_view else columns
+        computed_columns = [
+            col for col in columns_out if table.table_obj.columns[col].computed
+        ]
+        if computed_columns:
+            omit_filter = FilterOmit(columns_out, computed_columns)
+            columns_out = omit_filter.columns_out
+            if filter_view:
+                filter_view = FilterViewChain(
+                    filter_view.columns_in,
+                    columns_out,
+                    (filter_view, omit_filter),
+                )
+            else:
+                filter_view = omit_filter
+
         multiplied_indexes = [
             ind
             for ind, col_name in enumerate(columns_out)
             if col_name in (column_multipliers or set())
         ]
-        schema, table_name = self._remap_table(schema, table_name)
-        buffer: List[tuple] = []
 
-        table = self.meta.tables[(schema, table_name)]
+        buffer: List[tuple] = []
 
         def _flush_buffer():
             with self.engine.connect() as conn:
