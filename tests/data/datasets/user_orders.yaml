@@ -11,7 +11,7 @@ tables:
         dst_columns: [id]
   test.order_status:
     primary_key: [id]
-    columns: [id, order_id, info|str]
+    columns: [id, order_id, info|str, order_square|int|order_id*order_id]
     foreign_keys:
       - columns: [order_id]
         dst_table: test.orders

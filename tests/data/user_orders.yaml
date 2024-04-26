@@ -81,9 +81,12 @@ expected_sample:
     - id: 1
       order_id: 1
       info: pending
+      order_square: 1
     - id: 2
       order_id: 1
       info: sent
+      order_square: 1
     - id: 4
       order_id: 3
       info: lost
+      order_square: 9
