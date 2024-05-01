@@ -379,12 +379,21 @@ class Sampler:
     ) -> None:
         materialization_order = self._materialization_order(meta, plan)
         for schema, table_name, ref_count in materialization_order:
-            LOGGER.info("Materializing sample for %s.%s", schema, table_name)
-
             query = plan.queries[f"{schema}.{table_name}"]
             ttbl = TemporaryTable(
                 schema, table_name, query.build(meta.sql_build_context())
             )
+
+            LOGGER.info(
+                "Materializing sample for %s.%s",
+                schema,
+                table_name,
+            )
+            LOGGER.debug(
+                "  Using statement %s",
+                str(ttbl.compile(dialect=conn.engine.dialect)).replace("\n", " "),
+            )
+
             try:
                 result = conn.execute(ttbl)
             except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -447,7 +456,10 @@ class Sampler:
             else:
                 query_stmt = query.build(meta.sql_build_context())
 
-            LOGGER.info("Sampling with query %r", query_stmt)
+            LOGGER.debug(
+                "  Using statement %s",
+                str(query_stmt.compile(dialect=conn.engine.dialect)).replace("\n", " "),
+            )
             result = conn.execution_options(
                 stream_results=True,
                 yield_per=SOURCE_BUFFER_SIZE,

@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Iterator, List, Set, Tuple, TypeVar
+from typing import Dict, Iterable, Iterator, List, Set, Tuple, TypeVar
 
 NodeT = TypeVar("NodeT")
 GraphT = Dict[NodeT, Set[NodeT]]
@@ -49,42 +49,58 @@ def toposort(G: GraphT) -> List[NodeT]:
     return q
 
 
-def toposort_forward(
+def toposort_reachable(
     G: GraphT,
-    u: NodeT,
+    sources: Iterable[NodeT],
+    ignore: Set[NodeT],
 ) -> List[NodeT]:
     """
-    Returns either a topological sort of nodes reachable through forward edges
-    from `u` or raises a CycleException if a cycle is detected.
+    Returns a topological sort of all nodes strongly reachable from `sources`
+    without travelling through any nodes in the `ignore` set except for the
+    starting element from `sources`.
+
+    All elements of `sources` must be in the `ignore` set.
     """
 
-    weight: Dict[NodeT, int] = {u: 1}
-    on_stk: Set[NodeT] = {u}
-    stk: List[Tuple[NodeT, Iterator[NodeT]]] = [(u, iter(G[u]))]
+    weight: Dict[NodeT, int] = {}
 
-    while stk:
-        u, it = stk[-1]
-        try:
-            v = next(it)
-            if v in on_stk:
-                cyc = []
-                for w, _ in reversed(stk):
-                    cyc.append(w)
-                    if w == v:
-                        break
-                raise CycleException(cyc[::-1])
-            if v in weight:
-                weight[u] += weight[v]
-            else:
-                weight[v] = 1
-                on_stk.add(v)
-                stk.append((v, iter(G[v])))
-        except StopIteration:
-            stk.pop()
-            on_stk.remove(u)
-            if stk:
-                weight[stk[-1][0]] += weight[u]
-            continue
+    for source_u in sources:
+        assert source_u in ignore
+
+        for u in G[source_u]:
+            if u in ignore or u in weight:
+                continue
+
+            on_stk: Set[NodeT] = {u}
+            stk: List[Tuple[NodeT, Iterator[NodeT]]] = [(u, iter(G[u]))]
+            weight[u] = 1
+
+            while stk:
+                u, it = stk[-1]
+                try:
+                    v = next(it)
+                except StopIteration:
+                    stk.pop()
+                    on_stk.remove(u)
+                    if stk:
+                        weight[stk[-1][0]] += weight[u]
+                    continue
+
+                if v in ignore:
+                    continue
+                if v in on_stk:
+                    cyc = []
+                    for w, _ in reversed(stk):
+                        cyc.append(w)
+                        if w == v:
+                            break
+                    raise CycleException(cyc[::-1])
+                if v in weight:
+                    weight[u] += weight[v]
+                else:
+                    weight[v] = 1
+                    on_stk.add(v)
+                    stk.append((v, iter(G[v])))
 
     return [
         x[0] for x in sorted(weight.items(), key=lambda x: (x[1], x[0]), reverse=True)
@@ -114,10 +130,10 @@ def order_graph(G: GraphT, source: NodeT) -> List[NodeT]:
 
     The ordering will satisfy the following properties:
     - `source` will be first
-    - For every `u`
+    - For every other `u`
       - let `f_u` be # of `v` such that `v` -> `u` in G and `v` is ordered before `u`
       - let `b_u` be # of `v` such that `u` -> `v` in G and `v` is ordered before `u`
-      - Then either `f_u` = 0 or `b_u` = 0
+      - Then *exactly* one of `f_u` or `b_u` will be 0
       - This ensures `u` can be sampled by taking either the union of several forward
         relationships `v`->`u` or the intersection of several backwards relationships
         `u`->`v`.
@@ -125,48 +141,28 @@ def order_graph(G: GraphT, source: NodeT) -> List[NodeT]:
     Raises CycleException if no solution can be found.
     """
     # Algorithm approach:
-    #   Let `H` be the subgraph of nodes strongly reachable from `source`
     #
-    #   Begin resulting ordering with any topological sort of `H`
+    #   Let G_0 = G if `source` has outgoing edges, otherwise rev(G)
+    #   Let H_0 = [source]
     #
-    #   Delete all edges in `H` from `G`
+    #   Then recursively define
+    #     G_{i+1} = rev(G_i)
+    #     H_{i+1} = toposort_reachable(G_{i+1}, H_i, union(H_j for j < i))
     #
-    #   For each node `u` in `H`
-    #     Find `S_u` as all nodes strongly reachable in the reversed graph of `G` from `u`
-    #     Reverse all edges between two nodes in `S_u` in `G`
-    #     Recursively solve rooted at `u` and append ordering, omitting `u` from the start
+    #   Then final ordering is concatenation of all H_i
 
-    # Copy G's graph structure so we can mutate it
-    G = {u: set(edges) for u, edges in G.items()}
     RG = reverse_graph(G)
 
+    if not G[source]:
+        G, RG = RG, G
+
+    vis = {source}
+    H = [source]
     result = [source]
-
-    q = [source]
-    for u in q:
-        if not G[u]:
-            # Invert all edges reachable from u by only backward edges
-            edges: Set[NodeT] = set()
-            for v in toposort_forward(RG, u):
-                for w in G[v] & edges:
-                    G[v].remove(w)
-                    RG[v].add(w)
-                    G[w].add(v)
-                    RG[w].remove(v)
-                edges.add(v)
-
-        order = toposort_forward(G, u)
-        result.extend(order[1:])
-
-        # Remove all edges between nodes that have been ordered
-        nodes = set(order)
-        for v in nodes:
-            G[v] -= nodes
-            RG[v] -= nodes
-
-        # Recursively solve remaining parts of graph that point into the set of nodes
-        # we just solved.
-        assert not RG[u]
-        q.extend(v for v in order[1:] if RG[v])
+    while H:
+        H = toposort_reachable(G, H, vis)
+        result.extend(H)
+        vis.update(H)
+        G, RG = RG, G
 
     return result
