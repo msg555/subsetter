@@ -285,9 +285,12 @@ def _main_subset(args):
 
 def main():
     args = _parse_args()
+    logging_format = "%(levelname)s\t%(message)s"
+    if args.verbose > 0:
+        logging_format = "%(asctime)s\t%(levelname)s\t%(message)s"
     logging.basicConfig(
         level=logging.DEBUG if args.verbose > 0 else logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
+        format=logging_format,
     )
     logging.getLogger("faker").setLevel(logging.INFO)
 
@@ -303,7 +306,7 @@ def main():
                 raise RuntimeError("Unknown action")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.error(
-                "Unexpected error %s: %s",
+                "%s: %s",
                 type(exc).__name__,
                 exc,
                 exc_info=args.verbose > 1,

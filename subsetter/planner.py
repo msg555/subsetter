@@ -21,7 +21,7 @@ from subsetter.plan_model import (
     SQLWhereClauseSQL,
     SubsetPlan,
 )
-from subsetter.solver import order_graph
+from subsetter.solver import CycleException, order_graph
 
 LOGGER = logging.getLogger(__name__)
 
@@ -138,7 +138,18 @@ class Planner:
             ignore_tables=self.passthrough_tables | self.ignore_tables
         )
         graph[source] = set(self.config.targets)
-        order = order_graph(graph, source)[1:]
+
+        for target in self.config.targets:
+            if target not in graph:
+                raise ValueError(f"Cannot target unselected table {target}")
+
+        try:
+            order = order_graph(graph, source)[1:]
+        except CycleException as exc:
+            cycle_text = "->".join([*exc.cycle, exc.cycle[0]])  # type: ignore
+            raise ValueError(
+                f"Cannot create plan due to foreign key cycle {cycle_text}"
+            ) from exc
 
         order_st = set(order)
         for table in graph:
@@ -261,10 +272,27 @@ class Planner:
 
         # Make sure the solver gave us something reasonable
         assert not foreign_keys or not rev_foreign_keys
+        assert target or foreign_keys or rev_foreign_keys
+
+        # If we're a target we can only have reverse foreign key constraints.
+        # If we're selecting all rows we can just ignore them.
         if target:
             assert not foreign_keys
             if target.all_:
                 rev_foreign_keys.clear()
+            LOGGER.debug("Targetting %s and sampling from %s", table, rev_foreign_keys)
+        elif foreign_keys:
+            LOGGER.debug(
+                "Reverse sampling %s from %s",
+                table,
+                [f"{fk.dst_schema}.{fk.dst_table}" for fk in foreign_keys],
+            )
+        else:
+            LOGGER.debug(
+                "Sampling %s from %s",
+                table,
+                [f"{fk.dst_schema}.{fk.dst_table}" for fk in rev_foreign_keys],
+            )
 
         fk_constraints = [
             SQLWhereClauseIn(

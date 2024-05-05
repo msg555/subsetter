@@ -90,3 +90,40 @@ Multiplicity works by creating multiple copies of your sampled dataset in your
 output database. To ensure these datasets do not collide it remaps all foreign
 keys into a new key-space. Note that this process assumes your foreign keys are
 opaque integers identifiers.
+
+# FAQ
+
+## How do multiple targets work
+
+When using multiple targets each target table will be sampled entirely
+independently unless another target table directly or indirectly depends on some
+rows from it through a series of foreign keys. In the later case the subsetter
+will sample a union of the rows from the independently sampling of the table and
+those rows that other targets depend on.
+
+## How does the subsetter use foreign keys?
+
+The subsetter uses the foreign keys present in the database schema to understand
+relationships between data and generate a sampling plan. Foreign key
+relationships can be followed in both directions if need be. For example,
+suppose there was a `users` and an `orders` table where `orders` had a foreign key
+to the `users` table.
+
+If `users` was sampled first the subsetter would sample `orders` from `users` by
+sampling all rows from `orders` such that their corresponding user row existed.
+This represents the _maximal_ set of rows that can be included without violating
+foreign key constraints.
+
+Otherwise if `orders` was sampled first the subsetter would sample `users` from
+`orders` by sampling all rows from `users` such that they had at least one
+`order`. This represents the _minimal_ set of rows that can be included without
+violating foreign key constraints.
+
+In general the subsetter will always sample tables in an order such that all
+foreign key relationships to previously sampled tables are going in the same
+direction. If they are followed in the forwards direction (as in our first case)
+the subsetter will select the _intersection_ of all rows that obey each foreign
+key relationship. Otherwise if they are followed in the backwards direction (as
+in our second case) the subsetter will select the _union_ of all rows that obey
+each foreign key relationship. This strategy ensures no foreign key
+relationships are violated in the sampled data.

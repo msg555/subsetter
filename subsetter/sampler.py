@@ -262,8 +262,16 @@ class DatabaseOutput(SamplerOutput):
         schema, table_name = self._remap_table(schema, table_name)
         table = self.meta.tables[(schema, table_name)]
 
-        # Automatically omit any included computed columns
         columns_out = filter_view.columns_out if filter_view else columns
+        missing_columns = {
+            col for col in columns_out if col not in table.table_obj.columns
+        }
+        if missing_columns:
+            raise ValueError(
+                f"Destination table {schema}.{table_name} is missing expected columns {missing_columns}"
+            )
+
+        # Automatically omit any included computed columns
         computed_columns = [
             col for col in columns_out if table.table_obj.columns[col].computed
         ]
