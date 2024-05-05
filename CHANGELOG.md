@@ -1,3 +1,9 @@
+# v0.3.1
+
+- Update documentation
+- Improve error messaging
+- Update output formatting
+
 # v0.3.0
 
 - Added support for remapping schema and table names in sampling phase
