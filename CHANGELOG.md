@@ -3,6 +3,7 @@
 - Update documentation
 - Improve error messaging
 - Update output formatting
+- Add support for creating output schema if it does not exist
 
 # v0.3.0
 

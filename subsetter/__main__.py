@@ -74,6 +74,13 @@ def _add_sample_args(parser, *, subset_action: bool = False):
         default=False,
         help="Truncate existing output before sampling",
     )
+    parser.add_argument(
+        "--create",
+        action="store_const",
+        const=True,
+        default=False,
+        help="Create tables in destination from source if missing",
+    )
     output_parsers = parser.add_subparsers(
         dest="output",
         required=False,
@@ -269,7 +276,11 @@ def _main_sample(args):
         )
         sys.exit(1)
 
-    Sampler(_get_sample_config(args)).sample(plan, truncate=args.truncate)
+    Sampler(_get_sample_config(args)).sample(
+        plan,
+        truncate=args.truncate,
+        create=args.create,
+    )
 
 
 def _main_subset(args):
