@@ -130,6 +130,11 @@ class DatabaseMetadata:
             table_queue[num_selected_tables:],
         )
 
+    def track_new_table(self, table_obj: sa.Table) -> None:
+        if table_obj.schema is None:
+            raise ValueError("Table schema must be set")
+        self.tables[(table_obj.schema, table_obj.name)] = TableMetadata(table_obj)
+
     def infer_missing_foreign_keys(self) -> None:
         pk_map: Dict[Tuple[str, Tuple[str, ...]], Optional[TableMetadata]] = {}
         for table in self.tables.values():

@@ -35,8 +35,8 @@ output:
   # Will attempt to apply each replacement in the order they are listed. Example
   # below can be used to add the suffix "_out" to the schema.
   remap:
-    - search: "^(\w+)\."
-      replace: "\1_out."
+    - search: "^(\\w+)\\."
+      replace: "\\1_out."
 
 # Alternative configuration to output JSON files within a directory
 # output:

@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Tuple, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, Field
@@ -141,6 +141,9 @@ class SamplerOutput(abc.ABC):
     def truncate(self) -> None:
         """Delete any existing data that could interfere with output destination"""
 
+    def create(self, source_meta: DatabaseMetadata) -> None:
+        """Create any missing tables in destination from the source schema"""
+
     @abc.abstractmethod
     def insert_order(self) -> List[str]:
         """Return the order to insert data that respects foreign key relationships"""
@@ -214,6 +217,77 @@ class DatabaseOutput(SamplerOutput):
             list(self.table_remap),
             close_backward=True,
         )
+
+    def create(self, source_meta: DatabaseMetadata) -> None:
+        """Create any missing tables in destination from the source schema"""
+        metadata_obj = sa.MetaData()
+
+        table_obj_map = {}
+        tables_created = set()
+        for remapped_table, table in self.table_remap.items():
+            remap_schema, remap_table = parse_table_name(remapped_table)
+
+            if (remap_schema, remap_table) in self.meta.tables:
+                table_obj_map[table] = self.meta.tables[
+                    (remap_schema, remap_table)
+                ].table_obj
+                continue
+
+            table_obj = source_meta.tables[parse_table_name(table)].table_obj
+            table_obj_map[table] = sa.Table(
+                remap_table,
+                metadata_obj,
+                *(
+                    sa.Column(
+                        col.name,
+                        col.type,
+                        nullable=col.nullable,
+                        primary_key=col.primary_key,
+                    )
+                    for col in table_obj.columns
+                ),
+                schema=remap_schema,
+            )
+            tables_created.add(table_obj_map[table])
+
+        def _remap_cols(cols: Iterable[sa.Column]) -> List[sa.Column]:
+            return [
+                table_obj_map[f"{col.table.schema}.{col.table.name}"].columns[col.name]
+                for col in cols
+            ]
+
+        # Copy table constraints including foreign key constraints.
+        for table, remapped_table_obj in table_obj_map.items():
+            if remapped_table_obj not in tables_created:
+                continue
+
+            table_obj = source_meta.tables[parse_table_name(table)].table_obj
+            for constraint in table_obj.constraints:
+                if isinstance(constraint, sa.UniqueConstraint):
+                    remapped_table_obj.append_constraint(
+                        sa.UniqueConstraint(*_remap_cols(constraint.columns))
+                    )
+                if isinstance(constraint, sa.CheckConstraint):
+                    remapped_table_obj.append_constraint(
+                        sa.CheckConstraint(constraint.sqltext)
+                    )
+                if isinstance(constraint, sa.ForeignKeyConstraint):
+                    fk_cols = _remap_cols(elem.column for elem in constraint.elements)
+                    remapped_table_obj.append_constraint(
+                        sa.ForeignKeyConstraint(
+                            _remap_cols(constraint.columns),
+                            fk_cols,
+                            name=constraint.name,
+                        )
+                    )
+                    if fk_cols[0].table in tables_created:
+                        remapped_table_obj.add_is_dependent_on(fk_cols[0].table)
+
+        if tables_created:
+            LOGGER.info("Creating %d tables in destination", len(tables_created))
+            metadata_obj.create_all(bind=self.engine)
+            for remapped_table_obj in tables_created:
+                self.meta.track_new_table(remapped_table_obj)
 
     def truncate(self) -> None:
         for schema, table_name in self.additional_tables:
@@ -325,7 +399,13 @@ class Sampler:
             env_prefix="SUBSET_SOURCE_"
         )
 
-    def sample(self, plan: SubsetPlan, *, truncate: bool = False) -> None:
+    def sample(
+        self,
+        plan: SubsetPlan,
+        *,
+        truncate: bool = False,
+        create: bool = False,
+    ) -> None:
         meta, _ = DatabaseMetadata.from_engine(self.source_engine, list(plan.queries))
         if self.config.multiplicity.infer_foreign_keys:
             meta.infer_missing_foreign_keys()
@@ -336,6 +416,8 @@ class Sampler:
         )
 
         output = SamplerOutput.from_config(self.config.output, list(plan.queries))
+        if create:
+            output.create(meta)
         insert_order = output.insert_order()
         if truncate:
             output.truncate()
