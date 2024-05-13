@@ -94,7 +94,7 @@ def _col_spec(col: Union[str, ColumnDescriptor]) -> sa.Column:
 
 
 def apply_dataset(db_config: DatabaseConfig, dataset: TestDataset) -> None:
-    engine = sa.create_engine(db_config.database_url())
+    engine = db_config.database_engine()
 
     schemas = set()
     metadata = sa.MetaData()
@@ -105,14 +105,17 @@ def apply_dataset(db_config: DatabaseConfig, dataset: TestDataset) -> None:
         schemas.add(schema)
         schemas.add(schema + "_out")
 
-    with engine.connect() as conn:
-        for schema in schemas:
-            try:
-                conn.execute(sa.schema.DropSchema(schema, cascade=True, if_exists=True))
-            except sa.exc.ProgrammingError:
-                conn.execute(sa.schema.DropSchema(schema, if_exists=True))
-            conn.execute(sa.schema.CreateSchema(schema))
-        conn.commit()
+    if db_config.dialect != "sqlite":
+        with engine.connect() as conn:
+            for schema in schemas:
+                try:
+                    conn.execute(
+                        sa.schema.DropSchema(schema, cascade=True, if_exists=True)
+                    )
+                except sa.exc.ProgrammingError:
+                    conn.execute(sa.schema.DropSchema(schema, if_exists=True))
+                conn.execute(sa.schema.CreateSchema(schema))
+            conn.commit()
 
     metadata.create_all(engine)
 
@@ -124,7 +127,7 @@ def apply_dataset(db_config: DatabaseConfig, dataset: TestDataset) -> None:
 
 
 def get_rows(db_config, schema: str, table: str) -> List[Dict[str, Any]]:
-    engine = sa.create_engine(db_config.database_url())
+    engine = db_config.database_engine()
     with engine.connect() as conn:
         metadata_obj = sa.MetaData()
         table_obj = sa.Table(table, metadata_obj, schema=schema, autoload_with=conn)

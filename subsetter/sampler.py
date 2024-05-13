@@ -60,7 +60,7 @@ class TemporaryTable(Executable, ClauseElement):
         )
         return f"CREATE TEMPORARY TABLE {schema_enc}.{name_enc} AS {select_stmt}"
 
-    def _temporary_table_compile_postgres(self, compiler, **_) -> str:
+    def _temporary_table_compile_no_schema(self, compiler, **_) -> str:
         """
         Postgres creates temporary tables in a special schema. We make the table
         name incorporate the schema name to compensate and avoid collisions.
@@ -76,7 +76,9 @@ class TemporaryTable(Executable, ClauseElement):
         return f"CREATE TEMPORARY TABLE {name_enc} AS {select_stmt}"
 
 
-compiles(TemporaryTable, "postgresql")(TemporaryTable._temporary_table_compile_postgres)
+compiles(TemporaryTable, "postgresql", "sqlite")(
+    TemporaryTable._temporary_table_compile_no_schema
+)
 compiles(TemporaryTable)(TemporaryTable._temporary_table_compile_generic)
 
 

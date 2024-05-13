@@ -59,10 +59,14 @@ class PlannerConfig(BaseModel):
     ignore_fks: List[IgnoreFKConfig] = []
     extra_fks: List[ExtraFKConfig] = []
     infer_foreign_keys: bool = False
-    normalize_foreign_keys: bool = False
 
 
 class Planner:
+    """
+    Class responsible for taking in a plan configuration and a source database
+    schema and producing a subsetting strategy.
+    """
+
     def __init__(self, config: PlannerConfig) -> None:
         self.config = config
         self.engine = self.config.source.database_engine(env_prefix="SUBSET_SOURCE_")
@@ -92,10 +96,11 @@ class Planner:
                 extra_table[1],
             )
 
+        return self._plan_internal()
+
+    def _plan_internal(self) -> SubsetPlan:
         if self.config.infer_foreign_keys:
             self.meta.infer_missing_foreign_keys()
-        if self.config.normalize_foreign_keys:
-            self.meta.normalize_foreign_keys()
         self._remove_ignore_fks()
         self._add_extra_fks()
         self._check_ignore_tables()
@@ -280,16 +285,23 @@ class Planner:
             assert not foreign_keys
             if target.all_:
                 rev_foreign_keys.clear()
-            LOGGER.debug("Targetting %s and sampling from %s", table, rev_foreign_keys)
+            if rev_foreign_keys:
+                LOGGER.debug(
+                    "Sampling %s as union of target parameters and references from %s",
+                    table,
+                    [f"{fk.dst_schema}.{fk.dst_table}" for fk in rev_foreign_keys],
+                )
+            else:
+                LOGGER.debug("Targetting %s", table)
         elif foreign_keys:
             LOGGER.debug(
-                "Reverse sampling %s from %s",
+                "Sampling %s as intersection of references from %s",
                 table,
                 [f"{fk.dst_schema}.{fk.dst_table}" for fk in foreign_keys],
             )
         else:
             LOGGER.debug(
-                "Sampling %s from %s",
+                "Sampling %s as union of references from %s",
                 table,
                 [f"{fk.dst_schema}.{fk.dst_table}" for fk in rev_foreign_keys],
             )
@@ -327,17 +339,26 @@ class Planner:
             f"{table.schema}.{table.name}", []
         )
         conf_constraints_sql: List[SQLWhereClause] = []
-        all_columns = {column.name for column in table.table_obj.columns}
+        if conf_constraints and rev_foreign_keys:
+            raise ValueError(
+                f"Cannot apply table constraints to {table} without violating "
+                "foreign key constraints of previously sampled tables",
+            )
+
         for conf_constraint in conf_constraints:
-            if conf_constraint.column in all_columns:
-                conf_constraints_sql.append(
-                    SQLWhereClauseOperator(
-                        type_="operator",
-                        operator=conf_constraint.operator,
-                        column=conf_constraint.column,
-                        value=conf_constraint.value,
-                    )
+            if conf_constraint.column not in table.table_obj.columns:
+                raise ValueError(
+                    "Table {table} has no column {conf_constraint.column!r} for table constraint",
                 )
+
+            conf_constraints_sql.append(
+                SQLWhereClauseOperator(
+                    type_="operator",
+                    operator=conf_constraint.operator,
+                    column=conf_constraint.column,
+                    value=conf_constraint.value,
+                )
+            )
 
         # Calculate initial foreign-key / config constraint statement
         statements: List[SQLStatementSelect] = [
@@ -376,19 +397,14 @@ class Planner:
                 )
 
             for column, patterns in target.like.items():
-                target_constraints.append(
-                    SQLWhereClauseOr(
-                        type_="or",
-                        conditions=[
-                            SQLWhereClauseOperator(
-                                type_="operator",
-                                operator="like",
-                                column=column,
-                                value=pattern,
-                            )
-                            for pattern in patterns
-                        ],
+                target_constraints.extend(
+                    SQLWhereClauseOperator(
+                        type_="operator",
+                        operator="like",
+                        column=column,
+                        value=pattern,
                     )
+                    for pattern in patterns
                 )
 
             for column, in_list in target.in_.items():

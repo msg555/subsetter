@@ -2,7 +2,7 @@ import collections
 import dataclasses
 import logging
 from fnmatch import fnmatch
-from typing import Dict, List, Optional, Set, TextIO, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import sqlalchemy as sa
 
@@ -167,37 +167,6 @@ class DatabaseMetadata:
                         )
                         table.foreign_keys.append(fk)
 
-    def normalize_foreign_keys(self) -> None:
-        """
-        If table A has a foreign key to table B and they both share a foreign
-        key on the same column in table C, remove the foreign key from table A
-        assuming it is redundant.
-        """
-        fk_sets = {
-            table_key: {
-                (fk.dst_schema, fk.dst_table, fk.dst_columns)
-                for fk in table.foreign_keys
-            }
-            for table_key, table in self.tables.items()
-        }
-        for table in self.tables.values():
-            child_fk_sets = set()
-            for fk in table.foreign_keys:
-                child_fk_sets |= fk_sets[(fk.dst_schema, fk.dst_table)]
-            fk_out = []
-            for fk in table.foreign_keys:
-                if (fk.dst_schema, fk.dst_table, fk.dst_columns) not in child_fk_sets:
-                    fk_out.append(fk)
-                else:
-                    LOGGER.info(
-                        "Normalizing foreign key, removed %s->%s.%s on %r",
-                        table,
-                        fk.dst_schema,
-                        fk.dst_table,
-                        fk.columns,
-                    )
-            table.foreign_keys = fk_out
-
     def toposort(self) -> List[TableMetadata]:
         return [  # type: ignore
             self.tables[parse_table_name(u)] for u in toposort(self.as_graph())
@@ -247,20 +216,3 @@ class DatabaseMetadata:
             return self.tables[(ident.table_schema, ident.table_name)].table_obj
 
         return _context
-
-    def output_graphviz(self, fout: TextIO) -> None:
-        def _dot_label(lbl: TableMetadata) -> str:
-            return f'"{str(lbl)}"'
-
-        fout.write("digraph {\n")
-        for table in self.tables.values():
-            fout.write("  ")
-            fout.write(_dot_label(table))
-            fout.write(" -> {")
-
-            deps = {
-                self.tables[(fk.dst_schema, fk.dst_table)] for fk in table.foreign_keys
-            }
-            fout.write(", ".join(_dot_label(dep) for dep in deps))
-            fout.write("}\n")
-        fout.write("}\n")
