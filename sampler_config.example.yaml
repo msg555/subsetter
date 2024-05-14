@@ -7,12 +7,25 @@ source:
   username: my_user # overridden by SUBSET_SOURCE_USERNAME
   password: my_s3cret # overridden by SUBSET_SOURCE_PASSWORD
   # database: my_dbname # overridden by SUBSET_SOURCE_DATABASE (if needed)
+
+  # For sqlite the the file named by 'database' will be mounted as the 'main'
+  # schema. You can mount additional databases using the 'sqlite_databases'
+  # mapping:
+  #
+  # sqlite_databases:
+  #   foo: /path/to/foo.db
+  #   bar: /path/to/bar.db
+
   session_sqls: # Set any additional session variables; e.g.
     - SET @@session.max_statement_time=0
     - SET @@session.net_read_timeout=3600
     - SET @@session.net_write_timeout=3600
     - SET @@session.wait_timeout=28800
     - SET @@session.innodb_lock_wait_timeout=3600
+
+  # Set the transaction isolation level. Defaults to REPEATABLE READ for all
+  # engines other than sqlite which defaults to SERIALIZABLE.
+  isolation_level: "REPEATABLE READ"
 
 # Optionally specify the source database. This can also be passed on the command
 # line or through environment variables.

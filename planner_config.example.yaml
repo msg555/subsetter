@@ -20,8 +20,8 @@ targets:
     amount: 100
     # Additional possible filters shown below. Multiple filters can be provided
     # and the results will be intersected together (except all which overrides
-    # everything). Note that additional rows may be included beyond what is
-    # specified here if needed when following foreign keys.
+    # everything). Additional rows will only be sampled if a row from another
+    # targetted table has a dependence on them.
 
     # all: true
     # percent: 5.0
@@ -43,14 +43,11 @@ select:
   - db2.gadgets
   - db2.gizmos-*
 
-# Add additional constraints for some tables. The planner does not attempt to
-# verify that these constraints will not break foreign key relationships. In
-# general it's always safe to apply constraints to tables that have no incoming
-# foreign key constraints among selected tables. This config file does not
-# accept arbitrary SQL; however you can manually modify the SQL in the generated
-# plan with arbitrary SQL.
+# Add additional constraints for some tables. Constraints can only be applied
+# for tables where filtering rows would not cause foreign key constraints to be
+# violated.
 table_constraints:
-  db1.user-data:
+  db1.user_data:
   - column: action_date
     operator: '>'
     value: '2023-07-01'
@@ -84,12 +81,3 @@ extra_fks:
 # matches the name of a primary key column (that is unique within the database)
 # should function as a foreign key to that table.
 infer_foreign_keys: false
-
-# If set to true the subsetter will automatically attempt to normalize some
-# foreign key relationships. In particular if there are foreign key
-# relationships A->B, A->C, B->C then the subsetter will assume that the
-# relationship A->C is redundant and ignore it. Without this assumption this
-# sort of relationship triangle cannot be sampled with a "one table, one query"
-# strategy. Note that this does not currently attempt to normalize chains that
-# involve more than three tables.
-normalize_foreign_keys: false

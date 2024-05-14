@@ -4,6 +4,11 @@
 - Improve error messaging
 - Update output formatting
 - Add support for creating output schema if it does not exist
+- Removed `normalize_foreign_keys` option that is no longer needed
+- Like constraints in target constraints are now 'and'ed together as with all
+  other constraints instead of 'or'ed
+- Changed optional dependency names to match sqlalchemy
+- Added sqlite support (mostly to help with tests)
 
 # v0.3.0
 

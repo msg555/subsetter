@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 import pytest
 
@@ -31,6 +32,24 @@ def db_config_postgres(request):
     )
 
 
+@pytest.fixture
+def sqlite_init_db():
+    with tempfile.NamedTemporaryFile(suffix=".db") as tf1:
+        with tempfile.NamedTemporaryFile(suffix=".db") as tf2:
+            yield tf1.name, tf2.name
+
+
+def db_config_sqlite(request):
+    db1, db2 = request.getfixturevalue("sqlite_init_db")
+    return DatabaseConfig(
+        dialect="sqlite",
+        sqlite_databases={
+            "test": db1,
+            "test_out": db2,
+        },
+    )
+
+
 DATABASE_CONFIGURATIONS = [
     pytest.param(
         db_config_mysql,
@@ -47,6 +66,14 @@ DATABASE_CONFIGURATIONS = [
             pytest.mark.postgres_live,
         ],
         id="postgres",
+    ),
+    pytest.param(
+        db_config_sqlite,
+        marks=[
+            pytest.mark.usefixtures("sqlite_init_db"),
+            pytest.mark.sqlite_live,
+        ],
+        id="sqlite",
     ),
 ]
 
