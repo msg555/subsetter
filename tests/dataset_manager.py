@@ -101,7 +101,6 @@ def apply_dataset(db_config: DatabaseConfig, dataset: TestDataset) -> None:
     for table, table_config in dataset.tables.items():
         schema, table_name = parse_table_name(table)
         table_config.make_table(metadata, schema, table_name)
-        table_config.make_table(metadata, schema, table_name, schema_suffix="_out")
         schemas.add(schema)
         schemas.add(schema + "_out")
 
@@ -176,7 +175,7 @@ def do_dataset_test(db_config: DatabaseConfig, test_name: str) -> None:
     )
 
     sampler = Sampler(test_config.sample_config)
-    sampler.sample(plan)
+    sampler.sample(plan, create=True)
 
     sample = {
         table: get_rows(db_config, *parse_table_name(table))
