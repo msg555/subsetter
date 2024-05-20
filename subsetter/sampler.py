@@ -280,10 +280,9 @@ class DatabaseOutput(SamplerOutput):
                             _remap_cols(constraint.columns),
                             fk_cols,
                             name=constraint.name,
+                            use_alter=True,
                         )
                     )
-                    if fk_cols[0].table in tables_created:
-                        remapped_table_obj.add_is_dependent_on(fk_cols[0].table)
 
         if tables_created:
             LOGGER.info("Creating %d tables in destination", len(tables_created))
