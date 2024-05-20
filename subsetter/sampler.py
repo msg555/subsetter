@@ -284,6 +284,22 @@ class DatabaseOutput(SamplerOutput):
                         )
                     )
 
+            for index_idx, index in enumerate(table_obj.indexes):
+                sa.Index(
+                    f"idx_subsetter_{remapped_table_obj.name}_{index_idx}",
+                    *(
+                        (
+                            remapped_table_obj.columns[col.name]
+                            if isinstance(col, sa.Column)
+                            else col
+                        )
+                        for col in index.columns
+                    ),
+                    unique=index.unique,
+                    dialect_options=index.dialect_options,
+                    **index.dialect_kwargs,
+                )
+
         if tables_created:
             LOGGER.info("Creating %d tables in destination", len(tables_created))
             metadata_obj.create_all(bind=self.engine)
