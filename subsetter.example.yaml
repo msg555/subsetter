@@ -1,15 +1,21 @@
-# Specify the source database. Most parameters can be overriden with
-# environmental variables.
+# Specify the source database. Most parameters can be provided by an
+# environmenet variable if they are not provided here.
 source:
-  dialect: mysql # overridden by SUBSET_SOURCE_DIALECT (mysql or postgres)
-  host: my-database # overridden by SUBSET_SOURCE_HOST
-  port: 3306 # overridden by SUBSET_SOURCE_PORT
-  dialect: mysql  # overridden by SUBSET_SOURCE_DIALECT, supports mysql, postgres
-  username: my_user # overridden by SUBSET_SOURCE_USERNAME
-  password: my_s3cret # overridden by SUBSET_SOURCE_PASSWORD
+  dialect: mysql # defaults to SUBSET_SOURCE_DIALECT (mysql or postgres)
+  host: my-database # defaults to SUBSET_SOURCE_HOST
+  port: 3306 # defaults to SUBSET_SOURCE_PORT
+  dialect: mysql  # deafults to SUBSET_SOURCE_DIALECT, supports mysql, postgres
+  username: my_user # deafults to SUBSET_SOURCE_USERNAME
+  password: my_s3cret # deafults to SUBSET_SOURCE_PASSWORD
+  session_sqls: # Set any additional session variables; e.g.
+    - SET @@session.max_statement_time=0
+    - SET @@session.net_read_timeout=3600
+    - SET @@session.net_write_timeout=3600
+    - SET @@session.wait_timeout=28800
+    - SET @@session.innodb_lock_wait_timeout=3600
 
   # For engines where it applies specify database name to connect to as well.
-  # database: my_dbname # overridden by SUBSET_SOURCE_DATABASE
+  # database: my_dbname # deafults to SUBSET_SOURCE_DATABASE
 
   # For sqlite the the file named by 'database' will be mounted as the 'main'
   # schema. You can mount additional databases using the 'sqlite_databases'
@@ -18,6 +24,20 @@ source:
   # sqlite_databases:
   #   foo: /path/to/foo.db
   #   bar: /path/to/bar.db
+
+  # Specify additional SSL settings
+  ssl:
+    require: true # deafults to SUBSET_SOURCE_SSL_REQUIRE
+
+    # Optionally specify client certificate and key if needed
+    client:
+      cert: /path/to/client.crt # deafults to SUBSET_SOURCE_SSL_CLIENT_CERT
+      key: /path/to/client.key # deafults to SUBSET_SORUCE_SSL_CLIENT_KEY
+
+    server:
+      rootcert: /path/to/rootcert.crt # deafults to SUBSET_SOURCE_SSL_SERVER_ROOTCERT
+      verify: identity # can be 'none', 'cert', or 'identity'
+                       # deafults to SUBSET_SOURCE_SSL_SERVER_VERIFY
 
 
 # All plan-phase options. These options control what and how data will be
@@ -100,28 +120,16 @@ sampler:
   # Specify the output target. Generally this will be a database as shown below
   # although # writing output to disk is also supported. Similar to specifying
   # the source database, output destination parameters can largely be controlled
-  # with environmental variables.
+  # with environmental variables. See the documentation of the source config for
+  # full option details.
   output:
     mode: database # Write output directly into database
     dialect: mysql
-    host: my-dest-database # overridden by SUBSET_DESTINATION_HOST
-    port: 3306 # overridden by SUBSET_DESTINATION_PORT
-    username: my_dest_user # overridden by SUBSET_DESTINATION_USERNAME
-    password: my_dest_s3cret  # overridden by SUBSET_DESTINATION_PASSWORD
-    # database: my_dbname # overridden by SUBSET_DESTINATION_DATABASE (if needed)
-    session_sqls: # Set any additional session variables; e.g.
-      - SET @@session.max_statement_time=0
-      - SET @@session.net_read_timeout=3600
-      - SET @@session.net_write_timeout=3600
-      - SET @@session.wait_timeout=28800
-      - SET @@session.innodb_lock_wait_timeout=3600
-
-    # Apply regex search and replace rules to each source "schema.table" name.
-    # Will attempt to apply each replacement in the order they are listed. Example
-    # below can be used to add the suffix "_out" to the schema.
-    remap:
-      - search: "^(\\w+)\\."
-        replace: "\\1_out."
+    host: my-dest-database # deafults to SUBSET_DESTINATION_HOST
+    port: 3306 # deafults to SUBSET_DESTINATION_PORT
+    username: my_dest_user # deafults to SUBSET_DESTINATION_USERNAME
+    password: my_dest_s3cret  # deafults to SUBSET_DESTINATION_PASSWORD
+    # database: my_dbname # deafults to SUBSET_DESTINATION_DATABASE (if needed)
 
   # Alternative configuration to output JSON files within a directory
   # output:

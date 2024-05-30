@@ -1,6 +1,7 @@
-from typing import Annotated, Dict, List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
+from typing_extensions import Annotated
 
 from subsetter.common import DatabaseConfig, SQLKnownOperator, SQLLiteralType
 from subsetter.filters import FilterConfig

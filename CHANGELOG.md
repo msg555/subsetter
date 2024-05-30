@@ -1,8 +1,7 @@
 # v0.4.0
 
-- Add support for passing `connect_args`
 - Unified config file
-
+- Added ssl configuration support to source/output database connections
 
 # v0.3.1
 
