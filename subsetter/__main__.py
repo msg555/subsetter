@@ -110,7 +110,7 @@ def _get_config(args) -> SubsetterConfig:
     except IOError as exc:
         LOGGER.error(
             "Could not open subsetter config file %r: %s",
-            args.sample_config,
+            args.config,
             exc,
             exc_info=args.verbose > 1,
         )
