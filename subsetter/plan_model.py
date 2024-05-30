@@ -5,6 +5,8 @@ import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Annotated
 
+from subsetter.common import SQLKnownOperator, SQLLiteralType
+
 # pylint: disable=unused-argument
 
 
@@ -20,10 +22,6 @@ class SQLTableIdentifier(BaseModel):
 
     def build(self, context: SQLBuildContext) -> sa.Table:
         return context(self)
-
-
-SQLKnownOperator = Literal["<", ">", "=", "<>", "!=", "like", "not like"]
-SQLLiteralType = Union[str, int, float]
 
 
 class SQLWhereClauseFalse(BaseModel):

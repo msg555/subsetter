@@ -2,18 +2,13 @@ import contextlib
 import logging
 import sys
 from argparse import ArgumentParser
-from typing import Optional, get_args
 
 import yaml
 
-from subsetter.common import DatabaseConfig, DatabaseDialect
-from subsetter.planner import Planner, PlannerConfig, SubsetPlan
-from subsetter.sampler import (
-    DatabaseOutputConfig,
-    DirectoryOutputConfig,
-    Sampler,
-    SamplerConfig,
-)
+from subsetter.config_model import SubsetterConfig
+from subsetter.plan_model import SubsetPlan
+from subsetter.planner import Planner
+from subsetter.sampler import Sampler
 
 try:
     from tqdm.contrib.logging import logging_redirect_tqdm  # type: ignore
@@ -33,13 +28,6 @@ def _open_config_path(path: str):
 
 
 def _add_plan_args(parser, *, subset_action: bool = False):
-    parser.add_argument(
-        "--plan-config" if subset_action else "--config",
-        default="planner_config.yaml",
-        required=False,
-        help="Path to planner config file",
-        dest="plan_config",
-    )
     if not subset_action:
         parser.add_argument(
             "-o",
@@ -61,13 +49,6 @@ def _add_sample_args(parser, *, subset_action: bool = False):
             help="Path to plan config file",
         )
     parser.add_argument(
-        "--sample-config" if subset_action else "--config",
-        default=None,
-        required=False,
-        help="Optional path to sample config",
-        dest="sample_config",
-    )
-    parser.add_argument(
         "--truncate",
         action="store_const",
         const=True,
@@ -81,25 +62,6 @@ def _add_sample_args(parser, *, subset_action: bool = False):
         default=False,
         help="Create tables in destination from source if missing",
     )
-    output_parsers = parser.add_subparsers(
-        dest="output",
-        required=False,
-        help="Configure sampling output destination",
-    )
-
-    mysql_parser = output_parsers.add_parser(
-        "database", help="Write sampled data to a database"
-    )
-    mysql_parser.add_argument("--dialect", default=None, dest="dst_dialect")
-    mysql_parser.add_argument("--host", default=None, dest="dst_host")
-    mysql_parser.add_argument("--port", type=int, default=None, dest="dst_port")
-    mysql_parser.add_argument("--user", default=None, dest="dst_user")
-    mysql_parser.add_argument("--password", default=None, dest="dst_password")
-
-    directory_parser = output_parsers.add_parser(
-        "directory", help="Write sampled data into directory as json files"
-    )
-    directory_parser.add_argument("dir", help="Path to write json output")
 
 
 def _parse_args():
@@ -113,20 +75,10 @@ def _parse_args():
         default=0,
     )
     parser.add_argument(
-        "--src-dialect",
-        default=None,
-        choices=get_args(DatabaseDialect),
-        help="source database dialect",
+        "--config",
+        default="subsetter.yaml",
+        help="Path to subsetter config file, defaults to 'subsetter.yaml'",
     )
-    parser.add_argument("--src-host", default=None, help="source database host")
-    parser.add_argument(
-        "--src-port", type=int, default=None, help="source database port"
-    )
-    parser.add_argument(
-        "--src-database", default=None, help="source database to connect to"
-    )
-    parser.add_argument("--src-user", default=None, help="source database user")
-    parser.add_argument("--src-password", default=None, help="source database password")
     subparsers = parser.add_subparsers(
         required=True,
         dest="action",
@@ -144,89 +96,21 @@ def _parse_args():
     return parser.parse_args()
 
 
-def _get_source_database_config(
-    args, *, overlay: Optional[DatabaseConfig] = None
-) -> DatabaseConfig:
-    overlay = overlay or DatabaseConfig()
-    return DatabaseConfig(
-        dialect=args.src_dialect or overlay.dialect,
-        host=args.src_host or overlay.host,
-        port=args.src_port or overlay.port,
-        database=args.src_database or overlay.database,
-        username=args.src_user or overlay.username,
-        password=args.src_password or overlay.password,
-    )
-
-
-def _get_sample_config(args) -> SamplerConfig:
-    if args.output and args.sample_config:
-        LOGGER.error("Cannot pass --sample-config and output subcommand")
-        sys.exit(1)
-    if not args.output and not args.sample_config:
-        LOGGER.error("No --sample-config or output subcommand selected")
-        sys.exit(1)
-
-    if args.output:
-        if args.output == "database":
-            return SamplerConfig(
-                source=_get_source_database_config(args),
-                output=DatabaseOutputConfig(
-                    mode="database",
-                    dialect=args.dst_dialect,
-                    host=args.dst_host,
-                    port=args.dst_port,
-                    username=args.dst_user,
-                    password=args.dst_password,
-                ),
-            )
-        if args.output == "directory":
-            return SamplerConfig(
-                source=_get_source_database_config(args),
-                output=DirectoryOutputConfig(
-                    mode="directory",
-                    directory=args.dir,
-                ),
-            )
-        raise RuntimeError("unexpected output subcommand")
-
+def _get_config(args) -> SubsetterConfig:
     try:
-        with _open_config_path(args.sample_config) as fconfig:
-            config = SamplerConfig.model_validate(yaml.safe_load(fconfig))
+        with _open_config_path(args.config) as fconfig:
+            return SubsetterConfig.model_validate(yaml.safe_load(fconfig))
     except ValueError as exc:
         LOGGER.error(
-            "Unexpected sampler config file format: %s",
+            "Unexpected subsetter config file format: %s",
             exc,
             exc_info=args.verbose > 1,
         )
         sys.exit(1)
     except IOError as exc:
         LOGGER.error(
-            "Could not open sampler config file %r: %s",
+            "Could not open subsetter config file %r: %s",
             args.sample_config,
-            exc,
-            exc_info=args.verbose > 1,
-        )
-        sys.exit(1)
-
-    config.source = _get_source_database_config(args, overlay=config.source)
-    return config
-
-
-def _get_plan_config(args) -> PlannerConfig:
-    try:
-        with _open_config_path(args.plan_config) as fconfig:
-            return PlannerConfig.model_validate(yaml.safe_load(fconfig))
-    except ValueError as exc:
-        LOGGER.error(
-            "Unexpected plan file format: %s",
-            exc,
-            exc_info=args.verbose > 1,
-        )
-        sys.exit(1)
-    except IOError as exc:
-        LOGGER.error(
-            "Could not open plan config file %r: %s",
-            args.plan_config,
             exc,
             exc_info=args.verbose > 1,
         )
@@ -234,9 +118,12 @@ def _get_plan_config(args) -> PlannerConfig:
 
 
 def _main_plan(args):
-    config = _get_plan_config(args)
-    config.source = _get_source_database_config(args, overlay=config.source)
-    plan = Planner(config).plan()
+    config = _get_config(args)
+    if config.planner is None:
+        LOGGER.error("Config file must include a 'planner' section to run planner")
+        sys.exit(1)
+
+    plan = Planner(config.source, config.planner).plan()
     try:
         ctx = contextlib.nullcontext(sys.stdout)
         if args.plan_output:
@@ -257,6 +144,7 @@ def _main_plan(args):
 
 
 def _main_sample(args):
+    config = _get_config(args)
     try:
         with _open_config_path(args.plan) as fplan:
             plan = SubsetPlan.model_validate(yaml.safe_load(fplan))
@@ -276,7 +164,7 @@ def _main_sample(args):
         )
         sys.exit(1)
 
-    Sampler(_get_sample_config(args)).sample(
+    Sampler(config.source, config.sampler).sample(
         plan,
         truncate=args.truncate,
         create=args.create,
@@ -284,14 +172,19 @@ def _main_sample(args):
 
 
 def _main_subset(args):
-    planner_config = _get_plan_config(args)
-    planner_config.source = _get_source_database_config(
-        args, overlay=planner_config.source
+    config = _get_config(args)
+    if config.planner is None:
+        LOGGER.error(
+            "Config file must include a 'planner' section to run subset command"
+        )
+        sys.exit(1)
+
+    plan = Planner(config.source, config.planner).plan()
+    Sampler(config.source, config.sampler).sample(
+        plan,
+        truncate=args.truncate,
+        create=args.create,
     )
-    sampler_config = _get_sample_config(args)
-    sampler_config.source = planner_config.source
-    plan = Planner(planner_config).plan()
-    Sampler(sampler_config).sample(plan, truncate=args.truncate)
 
 
 def main():

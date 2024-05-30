@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel
@@ -13,6 +13,9 @@ DatabaseDialect = Literal[
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_DIALECT: Literal["mysql"] = "mysql"
+
+SQLKnownOperator = Literal["<", ">", "=", "<>", "!=", "like", "not like"]
+SQLLiteralType = Union[str, int, float]
 
 # pylint: disable=unused-argument
 

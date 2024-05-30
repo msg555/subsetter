@@ -1,3 +1,9 @@
+# v0.4.0
+
+- Add support for passing `connect_args`
+- Unified config file
+
+
 # v0.3.1
 
 - Update documentation
