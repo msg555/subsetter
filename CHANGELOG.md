@@ -1,3 +1,8 @@
+# v0.4.0
+
+- Unified config file
+- Added ssl configuration support to source/output database connections
+
 # v0.3.1
 
 - Update documentation

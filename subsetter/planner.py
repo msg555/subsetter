@@ -1,13 +1,10 @@
 import logging
-from typing import Dict, List, Optional, Set, Tuple, Union
-
-from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Set, Tuple
 
 from subsetter.common import DatabaseConfig, parse_table_name
+from subsetter.config_model import PlannerConfig
 from subsetter.metadata import DatabaseMetadata, ForeignKey, TableMetadata
 from subsetter.plan_model import (
-    SQLKnownOperator,
-    SQLLiteralType,
     SQLStatementSelect,
     SQLStatementUnion,
     SQLTableIdentifier,
@@ -26,50 +23,15 @@ from subsetter.solver import CycleException, order_graph
 LOGGER = logging.getLogger(__name__)
 
 
-class PlannerConfig(BaseModel):
-    class TargetConfig(BaseModel):
-        all_: bool = Field(False, alias="all")
-        percent: Optional[float] = None
-        amount: Optional[int] = None
-        like: Dict[str, List[str]] = {}
-        in_: Dict[str, List[SQLLiteralType]] = Field({}, alias="in")
-        sql: Optional[str] = None
-
-    class IgnoreFKConfig(BaseModel):
-        src_table: str
-        dst_table: str
-
-    class ExtraFKConfig(BaseModel):
-        src_table: str
-        src_columns: List[str]
-        dst_table: str
-        dst_columns: List[str]
-
-    class ColumnConstraint(BaseModel):
-        column: str
-        operator: SQLKnownOperator
-        value: Union[SQLLiteralType, List[SQLLiteralType]]
-
-    source: DatabaseConfig = DatabaseConfig()
-    table_constraints: Dict[str, List[ColumnConstraint]] = {}
-    select: List[str]
-    targets: Dict[str, TargetConfig]
-    ignore: List[str] = []
-    passthrough: List[str] = []
-    ignore_fks: List[IgnoreFKConfig] = []
-    extra_fks: List[ExtraFKConfig] = []
-    infer_foreign_keys: bool = False
-
-
 class Planner:
     """
     Class responsible for taking in a plan configuration and a source database
     schema and producing a subsetting strategy.
     """
 
-    def __init__(self, config: PlannerConfig) -> None:
+    def __init__(self, source: DatabaseConfig, config: PlannerConfig) -> None:
         self.config = config
-        self.engine = self.config.source.database_engine(env_prefix="SUBSET_SOURCE_")
+        self.engine = source.database_engine(env_prefix="SUBSET_SOURCE_")
         self.meta: DatabaseMetadata
         self.ignore_tables = {parse_table_name(table) for table in config.ignore}
         self.passthrough_tables = {

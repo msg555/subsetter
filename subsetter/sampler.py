@@ -4,16 +4,19 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, Iterable, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import sqlalchemy as sa
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.expression import ClauseElement, Executable
-from typing_extensions import Annotated
 
 from subsetter.common import DatabaseConfig, parse_table_name
-from subsetter.filters import FilterConfig, FilterOmit, FilterView, FilterViewChain
+from subsetter.config_model import (
+    DatabaseOutputConfig,
+    DirectoryOutputConfig,
+    SamplerConfig,
+)
+from subsetter.filters import FilterOmit, FilterView, FilterViewChain
 from subsetter.metadata import DatabaseMetadata
 from subsetter.plan_model import SQLTableIdentifier
 from subsetter.planner import SubsetPlan
@@ -88,42 +91,6 @@ def _multiply_column(
     if value is None:
         return None
     return value * multiplier + iteration
-
-
-class DirectoryOutputConfig(BaseModel):
-    mode: Literal["directory"]
-    directory: str
-
-
-class MultiplicityConfig(BaseModel):
-    multiplier: int = 1
-    infer_foreign_keys: bool = False
-    passthrough: List[str] = []
-    extra_columns: Dict[str, List[str]] = {}
-    ignore_primary_key_columns: Dict[str, List[str]] = {}
-
-
-class TableRemapPattern(BaseModel):
-    search: str
-    replace: str
-
-
-class DatabaseOutputConfig(DatabaseConfig):
-    mode: Literal["database"]
-    remap: List[TableRemapPattern] = []
-
-
-OutputType = Annotated[
-    Union[DirectoryOutputConfig, DatabaseOutputConfig],
-    Field(..., discriminator="mode"),
-]
-
-
-class SamplerConfig(BaseModel):
-    source: DatabaseConfig = DatabaseConfig()
-    output: OutputType = DirectoryOutputConfig(mode="directory", directory="output")
-    filters: Dict[str, List[FilterConfig]] = {}  # type: ignore
-    multiplicity: MultiplicityConfig = MultiplicityConfig()
 
 
 class SamplerOutput(abc.ABC):
@@ -410,11 +377,9 @@ class DatabaseOutput(SamplerOutput):
 
 
 class Sampler:
-    def __init__(self, config: SamplerConfig) -> None:
+    def __init__(self, source: DatabaseConfig, config: SamplerConfig) -> None:
         self.config = config
-        self.source_engine = self.config.source.database_engine(
-            env_prefix="SUBSET_SOURCE_"
-        )
+        self.source_engine = source.database_engine(env_prefix="SUBSET_SOURCE_")
 
     def sample(
         self,

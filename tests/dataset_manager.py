@@ -147,8 +147,7 @@ def do_dataset_test(db_config: DatabaseConfig, test_name: str) -> None:
 
     apply_dataset(db_config, dataset)
 
-    test_config.plan_config.source = db_config
-    planner = Planner(test_config.plan_config)
+    planner = Planner(db_config, test_config.plan_config)
     plan = planner.plan()
 
     if plan != test_config.expected_plan:
@@ -162,7 +161,6 @@ def do_dataset_test(db_config: DatabaseConfig, test_name: str) -> None:
         )
         assert plan == test_config.expected_plan, "Got unexpected plan"
 
-    test_config.sample_config.source = db_config
     test_config.sample_config.output = DatabaseOutputConfig(
         mode="database",
         remap=[
@@ -174,7 +172,7 @@ def do_dataset_test(db_config: DatabaseConfig, test_name: str) -> None:
         **db_config.model_dump(),
     )
 
-    sampler = Sampler(test_config.sample_config)
+    sampler = Sampler(db_config, test_config.sample_config)
     sampler.sample(plan, create=True)
 
     sample = {

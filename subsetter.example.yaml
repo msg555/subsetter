@@ -1,0 +1,265 @@
+# Specify the source database. Most parameters can be provided by an
+# environmenet variable if they are not provided here.
+source:
+  dialect: mysql # defaults to SUBSET_SOURCE_DIALECT (mysql or postgres)
+  host: my-database # defaults to SUBSET_SOURCE_HOST
+  port: 3306 # defaults to SUBSET_SOURCE_PORT
+  dialect: mysql  # deafults to SUBSET_SOURCE_DIALECT, supports mysql, postgres
+  username: my_user # deafults to SUBSET_SOURCE_USERNAME
+  password: my_s3cret # deafults to SUBSET_SOURCE_PASSWORD
+  session_sqls: # Set any additional session variables; e.g.
+    - SET @@session.max_statement_time=0
+    - SET @@session.net_read_timeout=3600
+    - SET @@session.net_write_timeout=3600
+    - SET @@session.wait_timeout=28800
+    - SET @@session.innodb_lock_wait_timeout=3600
+
+  # For engines where it applies specify database name to connect to as well.
+  # database: my_dbname # deafults to SUBSET_SOURCE_DATABASE
+
+  # For sqlite the the file named by 'database' will be mounted as the 'main'
+  # schema. You can mount additional databases using the 'sqlite_databases'
+  # mapping:
+  #
+  # sqlite_databases:
+  #   foo: /path/to/foo.db
+  #   bar: /path/to/bar.db
+
+  # Specify additional SSL settings
+  ssl:
+    require: true # deafults to SUBSET_SOURCE_SSL_REQUIRE
+
+    # Optionally specify client certificate and key if needed
+    client:
+      cert: /path/to/client.crt # deafults to SUBSET_SOURCE_SSL_CLIENT_CERT
+      key: /path/to/client.key # deafults to SUBSET_SORUCE_SSL_CLIENT_KEY
+
+    server:
+      rootcert: /path/to/rootcert.crt # deafults to SUBSET_SOURCE_SSL_SERVER_ROOTCERT
+      verify: identity # can be 'none', 'cert', or 'identity'
+                       # deafults to SUBSET_SOURCE_SSL_SERVER_VERIFY
+
+
+# All plan-phase options. These options control what and how data will be
+# sampled in the next phase.
+planner:
+  # Targets define where to start your sampling. Any additional rows brought in
+  # for any tables will be done just by following foreign keys (except for
+  # passthrough tables, see below)
+  targets:
+    # Sample 100 users randomly from db1.users
+    db1.users:
+      amount: 100
+      # Additional possible filters shown below. Multiple filters can be provided
+      # and the results will be intersected together (except all which overrides
+      # everything). Additional rows will only be sampled if a row from another
+      # targetted table has a dependence on them.
+
+      # all: true
+      # percent: 5.0
+      # sql: "EXISTS (SELECT * FROM db1.carts WHERE db1.carts.user_id = db1.users.user_id)"
+      # in:
+      #   user_id: [123, 456, 789]
+      # like:
+      #   email: ['%@somewhere.com']
+
+    # Sample 10% of rows in db2.gadgets
+    db2.gadgets:
+      percent: 10.0
+
+  # Select tells the planner what tables you want to pull in rows for. Note that
+  # the planner will pull in additional tables if there are foreign keys pointing
+  # to them within the already selected tables.
+  select:
+  - db1.*
+  - db2.gadgets
+  - db2.gizmos-*
+
+  # Add additional constraints for some tables. Constraints can only be applied
+  # for tables where filtering rows would not cause foreign key constraints to be
+  # violated.
+  table_constraints:
+    db1.user_data:
+    - column: action_date
+      operator: '>'
+      value: '2023-07-01'
+
+  # Passthrough tables will be copied in full. Passthrough tables must not have
+  # foreign keys pointing to non-passthrough tables. The planner will make no
+  # attempt to follow foreign keys involving passthrough tables. Generally
+  # relatively constant, lookup data should be marked as passthrough.
+  passthrough:
+  - db1.ui_features
+
+  # The planner does its best to generate a plan that will not break foreign key
+  # relationships. This isn't always possible without some help; here you can tell
+  # the planner it shouldn't worry about certain relationships so it can generate
+  # a plan. Foreign keys that exist primarily for de-normalization are especially
+  # good candidates to be ignored.
+  ignore_fks:
+  - src_table: db2.gizmos-foo
+    dst_table: db2.gizmos-bar
+
+  # Tell the planner about any foreign key relationships that logically exist but
+  # are not enforced in your database.
+  extra_fks:
+  - src_table: db2.gadgets
+    src_columns: [user_id]
+    dst_table: db1.users
+    dst_columns: [id]
+
+  # If set to true the subsetter will automatically attempt to infer foreign keys
+  # within a single database. It does this by inferring that a column name that
+  # matches the name of a primary key column (that is unique within the database)
+  # should function as a foreign key to that table.
+  infer_foreign_keys: false
+
+# Optional sampler config. Will write sample output to a directory named
+# 'output/' by default.
+sampler:
+  # Specify the output target. Generally this will be a database as shown below
+  # although # writing output to disk is also supported. Similar to specifying
+  # the source database, output destination parameters can largely be controlled
+  # with environmental variables. See the documentation of the source config for
+  # full option details.
+  output:
+    mode: database # Write output directly into database
+    dialect: mysql
+    host: my-dest-database # deafults to SUBSET_DESTINATION_HOST
+    port: 3306 # deafults to SUBSET_DESTINATION_PORT
+    username: my_dest_user # deafults to SUBSET_DESTINATION_USERNAME
+    password: my_dest_s3cret  # deafults to SUBSET_DESTINATION_PASSWORD
+    # database: my_dbname # deafults to SUBSET_DESTINATION_DATABASE (if needed)
+
+  # Alternative configuration to output JSON files within a directory
+  # output:
+  #   mode: directory
+  #   directory: some/output/dir/
+
+  # Filters allow you to anonymize and shape your output dataset.
+  filters:
+
+    # A list of filters can be given for each table. Filters are applied in order
+    # with the results of the last filter being part of the output.
+    db1.users:
+
+    # The 'null' secret will replace the sampled value with null for the given
+    # columns. The 'zero' filter works the same way but instead replaces the value
+    # with a 'zero' value of the same type (e.g. empty string or 0)
+    - op: "null"
+      columns: [big_secret]
+
+    # The 'omit' filter will remove the given column from the output set. This can
+    # be useful if that column doesn't exist in your output or it cannot be set
+    # directly.
+    - op: omit
+      columns: [extra_column]
+
+    # The 'constant' filter can be used to replace a column's value with a
+    # constant value instead.
+    - op: constant
+      columns: [is_active, role]
+      values: [1, admin]
+
+    # The 'random_int' and 'random_float' filters can replace a value with a
+    # random int or float in the desired range (inclusive).
+    - op: random_int
+      columns: [test_score]
+      low: 0
+      high: 100
+
+    # The 'random_string' filter can replace column values with random textual
+    # data in a variety of forms.
+    - op: random_string
+
+      # Here we generate a hex string of length 16. Other 'alphabets' include
+      # "alnum", "hex_lower", "hex_upper", "digit", "alpha", "alpha_lower",
+      # "alpha_upper".
+      alphabet: hex
+      length: 16
+
+    # The 'random_uuid' replaces the given column with a random uuid.
+    - op: random_uuid
+      columns: [gizmo_uuid]
+
+    # The remaining filters are wrappers around the corresponding Faker generator
+    # (see https://faker.readthedocs.io/en/master/). The full list of supported
+    # filters is:
+    # - fake_email
+    # - fake_first_name
+    # - fake_last_name
+    # - fake_name
+    # - fake_phone_number
+    # - fake_license_plate
+    # - fake_vin
+    # - fake_address
+    # - fake_building_number
+    # - fake_city
+    # - fake_state
+    # - fake_state_abbr
+    # - fake_country
+    # - fake_country_code
+    # - fake_postal_code
+    # - fake_street_address
+    # - fake_street_name
+    # - fake_latitude
+    # - fake_longitude
+    #
+    # If the optional property 'unique' is set Faker will use the 'unique'
+    # interface. Note that this can lead to failures if generating a lot of data
+    # or setting on filters with limited output space (e.g. "fake_state")
+    - op: fake_email
+      columns: [email_address]
+      unique: true # optional, if set uses the 'unique' faker interface
+
+    # Arbitrary filters can be implemented dynamically. To do so create a Python
+    # module that can be imported by the subsetter. The module should define a
+    # factory method that will be passed a list of the requested columns and
+    # should return a list of the values after filtering them. For example you
+    # could write:
+    #
+    # class MyFilter:
+    #     def __init__(self, mysuffix: str):
+    #         self.suffix = mysuffix
+    #
+    #         def __call__(self, values):
+    #             return [f"{value}-{self.suffix}" for value in values]
+    - op: plugin
+      columns: [col1, col2]
+      module: fully.qualified.module
+      class: MyFilter
+      kwargs:
+        mysuffix: hello!
+
+  # The sampler supports multiplying rows for generating additional data. By
+  # default this operates by mapping all primary keys and foreign keys into a
+  # new key-space.
+  #
+  # Note: This functionality is currently only limited to integral primary
+  # keys/foreign keys. Other types of keys, e.g. uuids, could be supported in
+  # the future. Non-opaque keys, like email addresses, will not be supported.
+  # Integer keys will be mapped into a new key-space using the equation:
+  #
+  #   new_id = source_id * multiplier + instance_id
+  multiplicity:
+    # Multiplication factor. If set to 1 the rest of these fields are ignored.
+    multiplier: 10
+
+    # Similar to planner_config.infer_foreign_keys
+    infer_foreign_keys: true
+
+    # Tables that should not be multiplied. This often should just be the same
+    # as your plan passthrough tables.
+    passthrough:
+      - db1.ui_features
+
+    # Extra columns that should have their ID-space mapped that aren't part of a
+    # primary key or foreign key.
+    extra_columns:
+      db2.gadgets: [user_id]
+
+    # Some tables may have multiple columns that make up the primary key. By
+    # default every column will be mapped; you can set this field to disable
+    # mapping of some of them.
+    ignore_primary_key_columns:
+      db1.gizmo: [setting_name]

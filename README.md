@@ -26,14 +26,16 @@ will be able to automatically generate a plan that can sample your data.
 ## Create a sampling plan
 
 The first step in subsetting a database is to generate a sampling plan. A
-sampling plan defines the queries that will be used to sample each table.
-You'll want to create a configuration file similar to
-[planner_config.example.yaml](planner_config.example.yaml) that tells the
-planner what tables you want to sample along with any additional constraints
-that should be considered. Then you can create a plan with the below command:
+sampling plan defines both the direct targets of the subsetter and what tables
+should be brought in through indirect foreign key references.  You'll want to
+create a configuration file similar to
+[subsetter.example.yaml](subsetter.example.yaml), making sure to fill out the
+`planner` section to tell the planner what tables you want to sample any
+additional constraints that should be considered. Then you can create a plan
+with the below command:
 
 ```sh
-subsetter plan -c my-config.yaml > plan.yaml
+subsetter -c my-config.yaml plan > plan.yaml
 ```
 
 If you inspect the generated plan YAML document you will see a syntax tree
@@ -47,26 +49,29 @@ write direct SQL here.
 
 The sample sub-command will sample rows from the source database into your
 target output (either a database or as json files) using a plan generated
-using the plan sub-command. This tool will **not** copy schema from the source
-database. Any sampled tables must already exist in the destination database.
+using the plan sub-command. By default this tool will **not** copy schema
+from the source database and expects tables to already exist. If you would like
+it to attempt to create tables in the output database pass the `--create` flag.
 Additionally you must pass `--truncate` if you wish to clear any existing data
-in the sampled tables that may interfere with the sampling process.
+in the output tables that may otherwise interfere with the sampling process.
 
 ```sh
-subsetter sample --config my-sample-config.yaml --plan my-plan.yaml --truncate
+subsetter --config my-config.yaml sample --plan my-plan.yaml --create --truncate
 ```
 
-The sampling process proceeds in three phases:
+The sampling process proceeds in four phases:
 
-1. If `--truncate` is specified any tables about to be sampled will be first truncated.
-2. Any sampled tables that are referenced by other tables will first be
+1. If `--create` is specified it will attempt to create any missing tables. Existing tables will not be touched even if the schema does not match what is expected.
+2. If `--truncate` is specified any tables about to be sampled will be first truncated.
+3. Any sampled tables that are referenced by other tables will first be
 materialized into temporary tables on the source database.
-3. Data is copied for each table from the source to destination.
+4. Data is copied for each table from the source to destination.
 
 The sampler also supports filters which allow you to transform and anonymize your
-data using simple column filters. See
-[sampler_config.sample.yaml](sampler_config.sample.yaml) for more details on what
-filters are available and how to configure them.
+data using simple column filters. Check the [example](subsetter.example.yaml) config's
+'sampler.filters' section for more details on what filters are available and how to
+configure them. If needed, custom Python plugins can be used to perform
+arbitrary transformations.
 
 ## Plan and sample in one action
 
@@ -76,15 +81,15 @@ in addition to ensuring the same source database configuration is used for
 each.
 
 ```sh
-subsetter subset --plan-config my-plan-config.yaml --sample-config my-sample-config.yaml
+subsetter -c my-config.yaml subset --create --truncate
 ```
 
 # Sampling Multiplicity
 
 Sampling usually means condensing a large dataset into a semantically consistent
 small dataset. However, there are times that what you really want to do is
-create a semantically consistent large dataset from your existing data. The
-sampler has support for this by setting the multiplicity factor.
+create a semantically consistent large dataset from your existing data (e.g. for
+performance testing). The sampler has support for this by setting the multiplicity factor.
 
 Multiplicity works by creating multiple copies of your sampled dataset in your
 output database. To ensure these datasets do not collide it remaps all foreign
