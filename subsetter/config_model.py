@@ -38,7 +38,7 @@ class PlannerConfig(BaseModel):
     passthrough: List[str] = []
     ignore_fks: List[IgnoreFKConfig] = []
     extra_fks: List[ExtraFKConfig] = []
-    infer_foreign_keys: bool = False
+    infer_foreign_keys: Literal["none", "schema", "all"] = "none"
 
 
 class DirectoryOutputConfig(BaseModel):

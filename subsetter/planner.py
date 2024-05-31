@@ -61,8 +61,10 @@ class Planner:
         return self._plan_internal()
 
     def _plan_internal(self) -> SubsetPlan:
-        if self.config.infer_foreign_keys:
-            self.meta.infer_missing_foreign_keys()
+        if self.config.infer_foreign_keys != "none":
+            self.meta.infer_missing_foreign_keys(
+                infer_all=self.config.infer_foreign_keys == "all"
+            )
         self._remove_ignore_fks()
         self._add_extra_fks()
         self._check_ignore_tables()

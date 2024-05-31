@@ -2,6 +2,7 @@ import contextlib
 import logging
 import sys
 from argparse import ArgumentParser
+from typing import Any
 
 import yaml
 
@@ -75,8 +76,9 @@ def _parse_args():
         default=0,
     )
     parser.add_argument(
+        "-c",
         "--config",
-        default="subsetter.yaml",
+        action="append",
         help="Path to subsetter config file, defaults to 'subsetter.yaml'",
     )
     subparsers = parser.add_subparsers(
@@ -97,20 +99,39 @@ def _parse_args():
 
 
 def _get_config(args) -> SubsetterConfig:
+    config_files = args.config
+    if not config_files:
+        config_files = ["subsetter.yaml"]
+
+    def _dict_merge(lhs, rhs):
+        if isinstance(lhs, dict) and isinstance(rhs, dict):
+            result = dict(lhs)
+            for key, val in rhs.items():
+                if key in result:
+                    result[key] = _dict_merge(result[key], val)
+                else:
+                    result[key] = val
+            return result
+        return rhs
+
     try:
-        with _open_config_path(args.config) as fconfig:
-            return SubsetterConfig.model_validate(yaml.safe_load(fconfig))
+        config_data: Any = {}
+        for config_file in config_files:
+            try:
+                with _open_config_path(config_file) as fconfig:
+                    config_data = _dict_merge(config_data, yaml.safe_load(fconfig))
+            except IOError as exc:
+                LOGGER.error(
+                    "Could not open subsetter config file %r: %s",
+                    config_file,
+                    exc,
+                    exc_info=args.verbose > 1,
+                )
+                sys.exit(1)
+        return SubsetterConfig.model_validate(config_data)
     except ValueError as exc:
         LOGGER.error(
             "Unexpected subsetter config file format: %s",
-            exc,
-            exc_info=args.verbose > 1,
-        )
-        sys.exit(1)
-    except IOError as exc:
-        LOGGER.error(
-            "Could not open subsetter config file %r: %s",
-            args.sample_config,
             exc,
             exc_info=args.verbose > 1,
         )

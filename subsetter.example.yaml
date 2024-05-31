@@ -108,11 +108,11 @@ planner:
     dst_table: db1.users
     dst_columns: [id]
 
-  # If set to true the subsetter will automatically attempt to infer foreign keys
-  # within a single database. It does this by inferring that a column name that
-  # matches the name of a primary key column (that is unique within the database)
-  # should function as a foreign key to that table.
-  infer_foreign_keys: false
+  # If set to true the subsetter will automatically attempt to infer foreign
+  # keys. It does this by inferring that a column name that matches the name
+  # of a primary key column should function as a foreign key to that table.
+  # If set to 'schema' will limit matches to tables within the same schema.
+  infer_foreign_keys: none # can be 'none', 'schema', or 'all'
 
 # Optional sampler config. Will write sample output to a directory named
 # 'output/' by default.
