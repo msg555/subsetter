@@ -135,22 +135,29 @@ class DatabaseMetadata:
             raise ValueError("Table schema must be set")
         self.tables[(table_obj.schema, table_obj.name)] = TableMetadata(table_obj)
 
-    def infer_missing_foreign_keys(self) -> None:
+    def infer_missing_foreign_keys(self, *, infer_all: bool = False) -> None:
+        def _key_pk(schema: str, pk: Tuple[str, ...]):
+            if infer_all:
+                return pk
+            return (schema, pk)
+
         pk_map: Dict[Tuple[str, Tuple[str, ...]], Optional[TableMetadata]] = {}
         for table in self.tables.values():
             if not table.primary_key:
                 continue
-            if table.primary_key in pk_map:
-                LOGGER.info("Duplicate primary key columsn found %r", table.primary_key)
-                pk_map[(table.schema, table.primary_key)] = None
+
+            map_key = _key_pk(table.schema, table.primary_key)
+            if map_key in pk_map:
+                LOGGER.info("Duplicate primary key columns found %r", table.primary_key)
+                pk_map[map_key] = None
             else:
-                pk_map[(table.schema, table.primary_key)] = table
+                pk_map[map_key] = table
 
         # Only infer single column primary keys
         for table in self.tables.values():
             fks = set(table.foreign_keys)
             for col in table.table_obj.columns:
-                dst_table = pk_map.get((table.schema, (col.name,)))
+                dst_table = pk_map.get(_key_pk(table.schema, (col.name,)))
                 if dst_table is not None and dst_table is not table:
                     fk = ForeignKey(
                         columns=(col.name,),

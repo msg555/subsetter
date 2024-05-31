@@ -2,6 +2,9 @@
 
 - Unified config file
 - Added ssl configuration support to source/output database connections
+- Fixed bug in infer foreign key logic that prevented it from detecting
+  duplicate primary keys
+- Added option to infer foreign keys across all schemas or just within schemas.
 
 # v0.3.1
 
