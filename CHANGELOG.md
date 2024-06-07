@@ -5,6 +5,8 @@
 - Fixed bug in infer foreign key logic that prevented it from detecting
   duplicate primary keys
 - Added option to infer foreign keys across all schemas or just within schemas.
+- Added database output `conflict_strategy` option
+- Added `include_depencencies` planner option
 
 # v0.3.1
 
