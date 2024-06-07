@@ -377,7 +377,7 @@ class Planner:
                     SQLWhereClauseIn(
                         type_="in",
                         columns=[column],
-                        values=[in_list],
+                        values=[[value] for value in in_list],
                     )
                 )
 
