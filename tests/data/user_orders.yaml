@@ -4,7 +4,7 @@ plan_config:
   targets:
     test.users:
       in:
-        sample: [1]
+        sample: [1, 99]
   select:
   - test.*
 
@@ -60,7 +60,7 @@ expected_plan:
         where:
           type: in
           columns: [sample]
-          values: [[1]]
+          values: [[1], [99]]
 
 expected_sample:
   test_out.users:

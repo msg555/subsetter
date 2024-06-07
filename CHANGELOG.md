@@ -7,6 +7,7 @@
 - Added option to infer foreign keys across all schemas or just within schemas.
 - Added database output `conflict_strategy` option
 - Added `include_depencencies` planner option
+- Fix bug generating plans with a target column in constraint with multiple options
 
 # v0.3.1
 
