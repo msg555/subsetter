@@ -43,7 +43,7 @@ class Planner:
         meta, extra_tables = DatabaseMetadata.from_engine(
             self.engine,
             self.config.select,
-            close_forward=True,
+            close_forward=self.config.include_dependencies,
         )
         self.meta = meta
         LOGGER.info("done!")
@@ -67,7 +67,8 @@ class Planner:
             )
         self._remove_ignore_fks()
         self._add_extra_fks()
-        self._check_ignore_tables()
+        if self.config.include_dependencies:
+            self._check_ignore_tables()
         self._check_passthrough_tables()
 
         order = self._solve_order()

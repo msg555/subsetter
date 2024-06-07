@@ -7,11 +7,13 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.expression import ClauseElement, Executable
 
 from subsetter.common import DatabaseConfig, parse_table_name
 from subsetter.config_model import (
+    ConflictStrategy,
     DatabaseOutputConfig,
     DirectoryOutputConfig,
     SamplerConfig,
@@ -83,6 +85,74 @@ compiles(TemporaryTable, "postgresql", "sqlite")(
     TemporaryTable._temporary_table_compile_no_schema
 )
 compiles(TemporaryTable)(TemporaryTable._temporary_table_compile_generic)
+
+
+# pylint: disable=too-many-ancestors,abstract-method
+class ConflictInsert(Executable, ClauseElement):
+    inherit_cache = False
+    _inline = False
+    _return_defaults = False
+
+    def __init__(self, conflict_strategy: ConflictStrategy, table: sa.Table) -> None:
+        self.conflict_strategy = conflict_strategy
+        self.table = table
+
+        if not self.table.primary_key:
+            # We only attempt to do this if there is a primary key
+            self.conflict_strategy = "error"
+        elif self.conflict_strategy == "replace" and len(self.table.columns) == len(
+            self.table.primary_key
+        ):
+            # If there are no other columns outside of the primary key the replace
+            # strategy is meaningless and we should just skip.
+            self.conflict_strategy = "skip"
+
+    def _insert_generic(self, compiler, **kwargs) -> str:
+        if self.conflict_strategy == "replace":
+            raise RuntimeError(
+                "'replace' conflict strategy is not supported for this dialect"
+            )
+        if self.conflict_strategy == "skip":
+            raise RuntimeError(
+                "'skip' conflict strategy is not supported for this dialect"
+            )
+        return compiler.process(sa.insert(self.table), **kwargs)
+
+    def _insert_mysql(self, compiler, **kwargs) -> str:
+        stmt = mysql.insert(self.table)
+        if self.conflict_strategy == "replace":
+            stmt = stmt.on_duplicate_key_update(stmt.inserted)
+        if self.conflict_strategy == "skip":
+            stmt = stmt.prefix_with("IGNORE")
+        return compiler.process(stmt, **kwargs)
+
+    def _insert_postgresql(self, compiler, **kwargs) -> str:
+        stmt = postgresql.insert(self.table)
+        if self.conflict_strategy == "replace":
+            stmt = stmt.on_conflict_do_update(
+                index_elements=self.table.primary_key,
+                set_=stmt.excluded,  # type: ignore
+            )
+        if self.conflict_strategy == "skip":
+            stmt = stmt.on_conflict_do_nothing()
+        return compiler.process(stmt, **kwargs)
+
+    def _insert_sqlite(self, compiler, **kwargs) -> str:
+        stmt = sqlite.insert(self.table)
+        if self.conflict_strategy == "replace":
+            stmt = stmt.on_conflict_do_update(
+                index_elements=self.table.primary_key,
+                set_=stmt.excluded,  # type: ignore
+            )
+        if self.conflict_strategy == "skip":
+            stmt = stmt.on_conflict_do_nothing()
+        return compiler.process(stmt, **kwargs)
+
+
+compiles(ConflictInsert, "sqlite")(ConflictInsert._insert_sqlite)
+compiles(ConflictInsert, "postgresql")(ConflictInsert._insert_postgresql)
+compiles(ConflictInsert, "mysql")(ConflictInsert._insert_mysql)
+compiles(ConflictInsert)(ConflictInsert._insert_generic)
 
 
 def _multiply_column(
@@ -172,6 +242,7 @@ class DatabaseOutput(SamplerOutput):
     def __init__(self, config: DatabaseOutputConfig, tables: List[str]) -> None:
         self.engine = config.database_engine(env_prefix="SUBSET_DESTINATION_")
         self.remap = config.remap
+        self.conflict_strategy = config.conflict_strategy
 
         self.table_remap: Dict[str, str] = {}
         for table in tables:
@@ -356,7 +427,7 @@ class DatabaseOutput(SamplerOutput):
         def _flush_buffer():
             with self.engine.connect() as conn:
                 conn.execute(
-                    sa.insert(table.table_obj),
+                    ConflictInsert(self.conflict_strategy, table.table_obj),
                     [dict(zip(columns_out, row)) for row in buffer],
                 )
                 conn.commit()

@@ -4,7 +4,6 @@ source:
   dialect: mysql # defaults to SUBSET_SOURCE_DIALECT (mysql or postgres)
   host: my-database # defaults to SUBSET_SOURCE_HOST
   port: 3306 # defaults to SUBSET_SOURCE_PORT
-  dialect: mysql  # deafults to SUBSET_SOURCE_DIALECT, supports mysql, postgres
   username: my_user # deafults to SUBSET_SOURCE_USERNAME
   password: my_s3cret # deafults to SUBSET_SOURCE_PASSWORD
   session_sqls: # Set any additional session variables; e.g.
@@ -130,6 +129,21 @@ sampler:
     username: my_dest_user # deafults to SUBSET_DESTINATION_USERNAME
     password: my_dest_s3cret  # deafults to SUBSET_DESTINATION_PASSWORD
     # database: my_dbname # deafults to SUBSET_DESTINATION_DATABASE (if needed)
+
+    # Apply regex search and replace rules to each source "schema.table" name.
+    # Will attempt to apply each replacement in the order they are listed. Example
+    # below can be used to add the suffix "_out" to the schema.
+    remap:
+      - search: "^(\\w+)\\."
+        replace: "\\1_out."
+
+    # If a primary key uniqueness constraint is violated this parameter controls
+    # what should be done with the inserted row. This should only happen if
+    # sampling data into a non-empty table. Options include:
+    #   error (the default): produce an error and fail sampling
+    #   replace: replace the row with the new sampled row
+    #   skip: do not write the sampeld row
+    conflict_strategy: error
 
   # Alternative configuration to output JSON files within a directory
   # output:

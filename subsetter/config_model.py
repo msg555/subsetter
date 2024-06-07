@@ -1,14 +1,18 @@
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Annotated
 
 from subsetter.common import DatabaseConfig, SQLKnownOperator, SQLLiteralType
 from subsetter.filters import FilterConfig
 
 
-class PlannerConfig(BaseModel):
-    class TargetConfig(BaseModel):
+class ForbidBaseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class PlannerConfig(ForbidBaseModel):
+    class TargetConfig(ForbidBaseModel):
         all_: bool = Field(False, alias="all")
         percent: Optional[float] = None
         amount: Optional[int] = None
@@ -16,17 +20,17 @@ class PlannerConfig(BaseModel):
         in_: Dict[str, List[SQLLiteralType]] = Field({}, alias="in")
         sql: Optional[str] = None
 
-    class IgnoreFKConfig(BaseModel):
+    class IgnoreFKConfig(ForbidBaseModel):
         src_table: str
         dst_table: str
 
-    class ExtraFKConfig(BaseModel):
+    class ExtraFKConfig(ForbidBaseModel):
         src_table: str
         src_columns: List[str]
         dst_table: str
         dst_columns: List[str]
 
-    class ColumnConstraint(BaseModel):
+    class ColumnConstraint(ForbidBaseModel):
         column: str
         operator: SQLKnownOperator
         value: Union[SQLLiteralType, List[SQLLiteralType]]
@@ -39,20 +43,25 @@ class PlannerConfig(BaseModel):
     ignore_fks: List[IgnoreFKConfig] = []
     extra_fks: List[ExtraFKConfig] = []
     infer_foreign_keys: Literal["none", "schema", "all"] = "none"
+    include_dependencies: bool = True
 
 
-class DirectoryOutputConfig(BaseModel):
+class DirectoryOutputConfig(ForbidBaseModel):
     mode: Literal["directory"]
     directory: str
 
 
+ConflictStrategy = Literal["error", "replace", "skip"]
+
+
 class DatabaseOutputConfig(DatabaseConfig):
-    class TableRemapPattern(BaseModel):
+    class TableRemapPattern(ForbidBaseModel):
         search: str
         replace: str
 
     mode: Literal["database"]
     remap: List[TableRemapPattern] = []
+    conflict_strategy: ConflictStrategy = "error"
 
 
 OutputType = Annotated[
@@ -61,8 +70,8 @@ OutputType = Annotated[
 ]
 
 
-class SamplerConfig(BaseModel):
-    class MultiplicityConfig(BaseModel):
+class SamplerConfig(ForbidBaseModel):
+    class MultiplicityConfig(ForbidBaseModel):
         multiplier: int = 1
         infer_foreign_keys: bool = False
         passthrough: List[str] = []
@@ -74,7 +83,7 @@ class SamplerConfig(BaseModel):
     multiplicity: MultiplicityConfig = MultiplicityConfig()
 
 
-class SubsetterConfig(BaseModel):
+class SubsetterConfig(ForbidBaseModel):
     source: DatabaseConfig = DatabaseConfig()
     planner: Optional[PlannerConfig] = None
     sampler: Optional[SamplerConfig] = None
