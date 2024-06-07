@@ -113,6 +113,12 @@ planner:
   # If set to 'schema' will limit matches to tables within the same schema.
   infer_foreign_keys: none # can be 'none', 'schema', or 'all'
 
+  # By default the subsetter will automatically pull in tables referenced by
+  # tables already being selected to ensure their dependent rows can be pulled
+  # in with sampling. If this behavior is not desired you can set this value to
+  # false.
+  include_dependencies: true
+
 # Optional sampler config. Will write sample output to a directory named
 # 'output/' by default.
 sampler:
