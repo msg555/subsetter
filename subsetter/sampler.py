@@ -93,19 +93,26 @@ class ConflictInsert(Executable, ClauseElement):
     _inline = False
     _return_defaults = False
 
-    def __init__(self, conflict_strategy: ConflictStrategy, table: sa.Table) -> None:
+    def __init__(
+        self,
+        conflict_strategy: ConflictStrategy,
+        table: sa.Table,
+        columns: Iterable[str],
+    ) -> None:
         self.conflict_strategy = conflict_strategy
         self.table = table
+        self.non_pk_columns = set(columns)
 
         if not self.table.primary_key:
             # We only attempt to do this if there is a primary key
             self.conflict_strategy = "error"
-        elif self.conflict_strategy == "replace" and len(self.table.columns) == len(
-            self.table.primary_key
-        ):
-            # If there are no other columns outside of the primary key the replace
-            # strategy is meaningless and we should just skip.
-            self.conflict_strategy = "skip"
+        else:
+            for column in self.table.primary_key:
+                self.non_pk_columns.remove(column.name)
+            if self.conflict_strategy == "replace" and not self.non_pk_columns:
+                # If there are no other columns outside of the primary key the replace
+                # strategy is meaningless and we should just skip.
+                self.conflict_strategy = "skip"
 
     def _insert_generic(self, compiler, **kwargs) -> str:
         if self.conflict_strategy == "replace":
@@ -121,7 +128,9 @@ class ConflictInsert(Executable, ClauseElement):
     def _insert_mysql(self, compiler, **kwargs) -> str:
         stmt = mysql.insert(self.table)
         if self.conflict_strategy == "replace":
-            stmt = stmt.on_duplicate_key_update(stmt.inserted)
+            stmt = stmt.on_duplicate_key_update(
+                {col: stmt.inserted[col] for col in self.non_pk_columns}
+            )
         if self.conflict_strategy == "skip":
             stmt = stmt.prefix_with("IGNORE")
         return compiler.process(stmt, **kwargs)
@@ -131,7 +140,7 @@ class ConflictInsert(Executable, ClauseElement):
         if self.conflict_strategy == "replace":
             stmt = stmt.on_conflict_do_update(
                 index_elements=self.table.primary_key,
-                set_=stmt.excluded,  # type: ignore
+                set_={col: stmt.excluded[col] for col in self.non_pk_columns},
             )
         if self.conflict_strategy == "skip":
             stmt = stmt.on_conflict_do_nothing()
@@ -427,7 +436,9 @@ class DatabaseOutput(SamplerOutput):
         def _flush_buffer():
             with self.engine.connect() as conn:
                 conn.execute(
-                    ConflictInsert(self.conflict_strategy, table.table_obj),
+                    ConflictInsert(
+                        self.conflict_strategy, table.table_obj, columns_out
+                    ),
                     [dict(zip(columns_out, row)) for row in buffer],
                 )
                 conn.commit()
