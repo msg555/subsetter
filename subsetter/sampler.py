@@ -624,7 +624,8 @@ class DatabaseOutput(SamplerOutput):
                     )
                 if offsets is not None:
                     for index, offset in offsets:
-                        out_row[index] += offset
+                        if out_row[index] is not None:
+                            out_row[index] += offset
                 if autoinc_index != -1:
                     if autoinc_max_written is None:
                         autoinc_max_written = out_row[autoinc_index]
