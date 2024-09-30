@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import sqlalchemy as sa
 from sqlalchemy.dialects import mysql, postgresql, sqlite
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.compiler import SQLCompiler
 from sqlalchemy.sql.expression import ClauseElement, Executable
 
 from subsetter.common import DatabaseConfig, parse_table_name
@@ -52,7 +53,7 @@ class TemporaryTable(Executable, ClauseElement):
         self.index = index
         self.table_obj: sa.Table
 
-    def _temporary_table_compile_generic(self, compiler, **_) -> str:
+    def _temporary_table_compile_generic(self, compiler: SQLCompiler, **_) -> str:
         name = self.name + self.TEMP_ID + str(self.index)
         schema_enc = compiler.dialect.identifier_preparer.quote(self.schema)
         name_enc = compiler.dialect.identifier_preparer.quote(name)
@@ -65,7 +66,7 @@ class TemporaryTable(Executable, ClauseElement):
         )
         return f"CREATE TEMPORARY TABLE {schema_enc}.{name_enc} AS {select_stmt}"
 
-    def _temporary_table_compile_no_schema(self, compiler, **_) -> str:
+    def _temporary_table_compile_no_schema(self, compiler: SQLCompiler, **_) -> str:
         """
         Postgres creates temporary tables in a special schema. We make the table
         name incorporate the schema name to compensate and avoid collisions.
@@ -114,7 +115,7 @@ class ConflictInsert(Executable, ClauseElement):
                 # strategy is meaningless and we should just skip.
                 self.conflict_strategy = "skip"
 
-    def _insert_generic(self, compiler, **kwargs) -> str:
+    def _insert_generic(self, compiler: SQLCompiler, **kwargs) -> str:
         if self.conflict_strategy == "replace":
             raise RuntimeError(
                 "'replace' conflict strategy is not supported for this dialect"
@@ -125,7 +126,7 @@ class ConflictInsert(Executable, ClauseElement):
             )
         return compiler.process(sa.insert(self.table), **kwargs)
 
-    def _insert_mysql(self, compiler, **kwargs) -> str:
+    def _insert_mysql(self, compiler: SQLCompiler, **kwargs) -> str:
         stmt = mysql.insert(self.table)
         if self.conflict_strategy == "replace":
             stmt = stmt.on_duplicate_key_update(
@@ -135,7 +136,7 @@ class ConflictInsert(Executable, ClauseElement):
             stmt = stmt.prefix_with("IGNORE")
         return compiler.process(stmt, **kwargs)
 
-    def _insert_postgresql(self, compiler, **kwargs) -> str:
+    def _insert_postgresql(self, compiler: SQLCompiler, **kwargs) -> str:
         stmt = postgresql.insert(self.table)
         if self.conflict_strategy == "replace":
             stmt = stmt.on_conflict_do_update(
@@ -146,7 +147,7 @@ class ConflictInsert(Executable, ClauseElement):
             stmt = stmt.on_conflict_do_nothing()
         return compiler.process(stmt, **kwargs)
 
-    def _insert_sqlite(self, compiler, **kwargs) -> str:
+    def _insert_sqlite(self, compiler: SQLCompiler, **kwargs) -> str:
         stmt = sqlite.insert(self.table)
         if self.conflict_strategy == "replace":
             stmt = stmt.on_conflict_do_update(
@@ -162,6 +163,69 @@ compiles(ConflictInsert, "sqlite")(ConflictInsert._insert_sqlite)
 compiles(ConflictInsert, "postgresql")(ConflictInsert._insert_postgresql)
 compiles(ConflictInsert, "mysql")(ConflictInsert._insert_mysql)
 compiles(ConflictInsert)(ConflictInsert._insert_generic)
+
+
+def _autoincrement_needs_updating(engine) -> bool:
+    """
+    Returns True if the engine doesn't automatically update auto-increment values
+    to the highest inserted value for that column. Currently only postgresql
+    does not do this among supported engines.
+    """
+    return engine.dialect.name == "postgresql"
+
+
+def _autoincrement_get(engine, table: sa.Table) -> Optional[int]:
+    """
+    Get the current auto-increment state.
+    """
+    if not _autoincrement_needs_updating(engine) or table.autoincrement_column is None:
+        return None
+    assert engine.dialect.name == "postgresql"
+
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                sa.text("SELECT currval(pg_get_serial_sequence(:tab, :col))"),
+                {
+                    "tab": f"{table.schema}.{table.name}",
+                    "col": table.autoincrement_column.name,
+                },
+            )
+            row = next(iter(result), None)
+            return row[0] if row else None
+    except sa.exc.OperationalError as exc:
+        if "not yet defined in this session" not in str(exc):
+            raise
+        return None
+
+
+def _autoincrement_update(engine, table: sa.Table, value: Optional[int]) -> None:
+    """
+    Update the auto-increment state to ensure the next generated value is greater
+    than value.
+    """
+    if (
+        not _autoincrement_needs_updating(engine)
+        or table.autoincrement_column is None
+        or value is None
+    ):
+        return
+    assert engine.dialect.name == "postgresql"
+
+    curval = _autoincrement_get(engine, table)
+    if curval is not None and curval > value:
+        return
+
+    with engine.connect() as conn:
+        conn.execute(
+            sa.text("SELECT setval(pg_get_serial_sequence(:tab, :col), :val)"),
+            {
+                "tab": f"{table.schema}.{table.name}",
+                "col": table.autoincrement_column.name,
+                "val": value,
+            },
+        )
+        conn.commit()
 
 
 def _multiply_column(
@@ -431,6 +495,19 @@ class DatabaseOutput(SamplerOutput):
             if col_name in (column_multipliers or set())
         ]
 
+        autoinc_index = -1
+        autoinc_max_written = None
+        if (
+            _autoincrement_needs_updating(self.engine)
+            and table.table_obj.autoincrement_column is not None
+        ):
+            try:
+                autoinc_index = columns_out.index(
+                    table.table_obj.autoincrement_column.name
+                )
+            except ValueError:
+                pass
+
         buffer: List[tuple] = []
 
         def _flush_buffer():
@@ -451,11 +528,20 @@ class DatabaseOutput(SamplerOutput):
                     out_row[index] = _multiply_column(
                         out_row[index], multiplier, iteration
                     )
+                if autoinc_index != -1:
+                    if autoinc_max_written is None:
+                        autoinc_max_written = out_row[autoinc_index]
+                    else:
+                        autoinc_max_written = max(
+                            autoinc_max_written, out_row[autoinc_index]
+                        )
                 buffer.append(tuple(out_row))
                 if len(buffer) > DESTINATION_BUFFER_SIZE:
                     _flush_buffer()
         if buffer:
             _flush_buffer()
+
+        _autoincrement_update(self.engine, table.table_obj, autoinc_max_written)
 
 
 class Sampler:
