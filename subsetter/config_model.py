@@ -62,6 +62,7 @@ class DatabaseOutputConfig(DatabaseConfig):
     mode: Literal["database"]
     remap: List[TableRemapPattern] = []
     conflict_strategy: ConflictStrategy = "error"
+    merge: bool = False
 
 
 OutputType = Annotated[
@@ -73,14 +74,14 @@ OutputType = Annotated[
 class SamplerConfig(ForbidBaseModel):
     class MultiplicityConfig(ForbidBaseModel):
         multiplier: int = 1
-        infer_foreign_keys: bool = False
-        passthrough: List[str] = []
+        ignore_tables: List[str] = []
         extra_columns: Dict[str, List[str]] = {}
         ignore_primary_key_columns: Dict[str, List[str]] = {}
 
     output: OutputType = DirectoryOutputConfig(mode="directory", directory="output")
     filters: Dict[str, List[FilterConfig]] = {}  # type: ignore
     multiplicity: MultiplicityConfig = MultiplicityConfig()
+    infer_foreign_keys: Literal["none", "schema", "all"] = "none"
 
 
 class SubsetterConfig(ForbidBaseModel):

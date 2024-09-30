@@ -151,6 +151,17 @@ sampler:
     #   skip: do not write the sampeld row
     conflict_strategy: error
 
+    # If merge is enabled subsetter will attempt to merge sampled data into
+    # existing tables. Passthrough tables will be inserted as normal except
+    # it will use the 'skip' conflict strategy. All other tables must have a
+    # single-column, integral primary key.
+    #
+    # Non-passthrough tables will have their primary keys remapped using the
+    # below equation:
+    #
+    #   new_id = source_id + max(0, existing_pks...) + 1
+    merge: false
+
   # Alternative configuration to output JSON files within a directory
   # output:
   #   mode: directory
@@ -265,12 +276,9 @@ sampler:
     # Multiplication factor. If set to 1 the rest of these fields are ignored.
     multiplier: 10
 
-    # Similar to planner_config.infer_foreign_keys
-    infer_foreign_keys: true
-
-    # Tables that should not be multiplied. This often should just be the same
-    # as your plan passthrough tables.
-    passthrough:
+    # Tables that should not be multiplied. Note passthrough tables are never
+    # multiplied and do not need to be listed here.
+    ignore_tables:
       - db1.ui_features
 
     # Extra columns that should have their ID-space mapped that aren't part of a
@@ -283,3 +291,11 @@ sampler:
     # mapping of some of them.
     ignore_primary_key_columns:
       db1.gizmo: [setting_name]
+
+  # Multiplicity and merge logic require analysis of foreign key constraints in
+  # the source database. If using either of these options this `infer_foreign_keys`
+  # setting will use the same logic as in planner.infer_foreign_keys to infer
+  # foreign key relationships when a column name uniquely matches a
+  # single-column primary key in another table.
+  infer_foreign_keys: none # can be 'none', 'schema', or 'all'
+

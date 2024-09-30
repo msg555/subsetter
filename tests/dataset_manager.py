@@ -190,3 +190,8 @@ def do_dataset_test(db_config: DatabaseConfig, test_name: str) -> None:
             sort_keys=True,
         )
         assert sample == test_config.expected_sample, "Got unexpected sample"
+
+    # Run sample again in merge mode to ensure it succeeds
+    test_config.sample_config.output.merge = True
+    sampler = Sampler(db_config, test_config.sample_config)
+    sampler.sample(plan)

@@ -1,0 +1,35 @@
+tables:
+  test.owners:
+    primary_key: [id]
+    columns: [id, name|str, sample]
+  test.instruments:
+    primary_key: [id]
+    columns: [id, owner_id, instrument_id]
+    foreign_keys:
+      - columns: [owner_id]
+        dst_table: test.owners
+        dst_columns: [id]
+      - columns: [instrument_id]
+        dst_table: test.instrument_types
+        dst_columns: [id]
+  test.instrument_types:
+    primary_key: [id]
+    columns: [id, name|str]
+data:
+  test.instrument_types:
+    - [1, piano]
+    - [2, guitar]
+    - [3, horn]
+    - [4, triangle]
+    - [5, saxophone]
+  test.owners:
+    - [1, john, 1]
+    - [2, peter, 0]
+    - [3, richard, 1]
+  test.instruments:
+    - [1, 1, 1]
+    - [2, 2, 2]
+    - [3, 3, 5]
+    - [4, 1, 1]
+    - [5, 2, 3]
+    - [6, 3, 3]

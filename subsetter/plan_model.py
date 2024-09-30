@@ -354,3 +354,4 @@ class SQLTableQuery(BaseModel):
 
 class SubsetPlan(BaseModel):
     queries: Dict[str, SQLTableQuery]
+    passthrough: List[str] = []

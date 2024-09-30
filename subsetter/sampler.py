@@ -253,29 +253,40 @@ class SamplerOutput(abc.ABC):
     def truncate(self) -> None:
         """Delete any existing data that could interfere with output destination"""
 
-    def create(self, source_meta: DatabaseMetadata) -> None:
+    def create(self) -> None:
         """Create any missing tables in destination from the source schema"""
+
+    def prepare(self) -> None:
+        """Called just prior to sampling after truncate/create have executed"""
 
     @abc.abstractmethod
     def insert_order(self) -> List[str]:
         """Return the order to insert data that respects foreign key relationships"""
 
     @staticmethod
-    def from_config(config: Any, tables: List[str]) -> "SamplerOutput":
+    def from_config(
+        config: Any, plan: SubsetPlan, source_meta: DatabaseMetadata
+    ) -> "SamplerOutput":
         if isinstance(config, DirectoryOutputConfig):
-            return DirectoryOutput(config, tables)
+            return DirectoryOutput(config, plan, source_meta)
         if isinstance(config, DatabaseOutputConfig):
-            return DatabaseOutput(config, tables)
+            return DatabaseOutput(config, plan, source_meta)
         raise RuntimeError("Unknown config type")
 
 
 class DirectoryOutput(SamplerOutput):
-    def __init__(self, config: DirectoryOutputConfig, tables: List[str]) -> None:
+    def __init__(
+        self,
+        config: DirectoryOutputConfig,
+        plan: SubsetPlan,
+        source_meta: DatabaseMetadata,
+    ) -> None:
         self.directory = config.directory
-        self.tables = list(tables)
+        self.plan = plan
+        self.source_meta = source_meta
 
     def insert_order(self) -> List[str]:
-        return self.tables
+        return list(self.plan.queries)
 
     def output_result_set(
         self,
@@ -312,13 +323,23 @@ class DatabaseOutput(SamplerOutput):
     # Pylint getting weirdly confused about the self.meta member
     # pylint: disable=no-member
 
-    def __init__(self, config: DatabaseOutputConfig, tables: List[str]) -> None:
+    def __init__(
+        self,
+        config: DatabaseOutputConfig,
+        plan: SubsetPlan,
+        source_meta: DatabaseMetadata,
+    ) -> None:
         self.engine = config.database_engine(env_prefix="SUBSET_DESTINATION_")
         self.remap = config.remap
         self.conflict_strategy = config.conflict_strategy
+        self.merge = config.merge
+        self.plan = plan
+        self.source_meta = source_meta
+        self.table_offsets: Dict[Tuple[str, str], Dict[str, int]] = {}
+        self.passthrough_tables = set(self.plan.passthrough)
 
         self.table_remap: Dict[str, str] = {}
-        for table in tables:
+        for table in plan.queries:
             remapped_table = ".".join(self._remap_table(*parse_table_name(table)))
             if self.table_remap.setdefault(remapped_table, table) != table:
                 raise ValueError(
@@ -331,8 +352,74 @@ class DatabaseOutput(SamplerOutput):
             close_backward=True,
         )
 
-    def create(self, source_meta: DatabaseMetadata) -> None:
+    def prepare(self) -> None:
+        """
+        If merge mode is enabled calculate the offsets to assign to each primary
+        key for each table. Uses the foreign key analysis done at the source
+        database to inform what foreign key relationships are expected to exist
+        in the destination.
+        """
+        if not self.merge:
+            return
+
+        pk_max_values = {}
+        self.table_offsets.clear()
+        for source_table in self.plan.queries:
+            if source_table in self.passthrough_tables:
+                continue
+
+            schema, table_name = self._remap_table(*parse_table_name(source_table))
+            self.table_offsets[(schema, table_name)] = {}
+            table = self.meta.tables[(schema, table_name)]
+            if len(table.primary_key) != 1:
+                LOGGER.warning(
+                    "Cannot merge multi-column primary key for table %s.%s, ignoring",
+                    schema,
+                    table_name,
+                )
+                continue
+
+            pk_col = table.table_obj.columns[table.primary_key[0]]
+            if not issubclass(pk_col.type.python_type, int):  # type: ignore
+                LOGGER.warning(
+                    "Cannot merge non-integer primary key for table %s.%s, ignoring",
+                    schema,
+                    table_name,
+                )
+                continue
+
+            with self.engine.connect() as conn:
+                max_pk_val = conn.scalar(sa.select(sa.func.max(pk_col)))
+
+            pk_max_values[source_table] = max_pk_val
+            if max_pk_val is not None:
+                self.table_offsets[(schema, table_name)][pk_col.name] = max_pk_val + 1
+
+        for source_table in self.plan.queries:
+            if source_table in self.passthrough_tables:
+                continue
+
+            src_schema, src_table_name = parse_table_name(source_table)
+            src_table = self.source_meta.tables[(src_schema, src_table_name)]
+            for fk in src_table.foreign_keys:
+                if len(fk.columns) != 1:
+                    continue
+                if (
+                    fk.dst_columns
+                    != self.source_meta.tables[
+                        (fk.dst_schema, fk.dst_table)
+                    ].primary_key
+                ):
+                    continue
+                offset = pk_max_values.get(f"{fk.dst_schema}.{fk.dst_table}")
+                if offset is not None:
+                    self.table_offsets[self._remap_table(src_schema, src_table_name)][
+                        fk.columns[0]
+                    ] = (offset + 1)
+
+    def create(self) -> None:
         """Create any missing tables in destination from the source schema"""
+        source_meta = self.source_meta
         metadata_obj = sa.MetaData()
 
         table_obj_map = {}
@@ -461,7 +548,8 @@ class DatabaseOutput(SamplerOutput):
         multiplier: int = 1,
         column_multipliers: Optional[Set[str]] = None,
     ) -> None:
-        schema, table_name = self._remap_table(schema, table_name)
+        (src_schema, src_table_name) = (schema, table_name)
+        schema, table_name = self._remap_table(src_schema, src_table_name)
         table = self.meta.tables[(schema, table_name)]
 
         columns_out = filter_view.columns_out if filter_view else columns
@@ -489,6 +577,14 @@ class DatabaseOutput(SamplerOutput):
             else:
                 filter_view = omit_filter
 
+        offsets = None
+        if table_offsets := self.table_offsets.get((schema, table_name)):
+            offsets = [
+                (index, table_offsets[col])
+                for index, col in enumerate(columns_out)
+                if col in table_offsets
+            ]
+
         multiplied_indexes = [
             ind
             for ind, col_name in enumerate(columns_out)
@@ -510,12 +606,14 @@ class DatabaseOutput(SamplerOutput):
 
         buffer: List[tuple] = []
 
+        conflict_strategy = self.conflict_strategy
+        if self.merge and f"{src_schema}.{src_table_name}" in self.passthrough_tables:
+            conflict_strategy = "skip"
+
         def _flush_buffer():
             with self.engine.connect() as conn:
                 conn.execute(
-                    ConflictInsert(
-                        self.conflict_strategy, table.table_obj, columns_out
-                    ),
+                    ConflictInsert(conflict_strategy, table.table_obj, columns_out),
                     [dict(zip(columns_out, row)) for row in buffer],
                 )
                 conn.commit()
@@ -528,6 +626,9 @@ class DatabaseOutput(SamplerOutput):
                     out_row[index] = _multiply_column(
                         out_row[index], multiplier, iteration
                     )
+                if offsets is not None:
+                    for index, offset in offsets:
+                        out_row[index] += offset
                 if autoinc_index != -1:
                     if autoinc_max_written is None:
                         autoinc_max_written = out_row[autoinc_index]
@@ -557,20 +658,21 @@ class Sampler:
         create: bool = False,
     ) -> None:
         meta, _ = DatabaseMetadata.from_engine(self.source_engine, list(plan.queries))
-        if self.config.multiplicity.infer_foreign_keys:
-            meta.infer_missing_foreign_keys()
+        if self.config.infer_foreign_keys != "none":
+            meta.infer_missing_foreign_keys(
+                infer_all=self.config.infer_foreign_keys == "all"
+            )
         self._validate_filters(meta)
 
-        table_column_multipliers = self._get_multiplied_columns(
-            meta, list(plan.queries)
-        )
+        table_column_multipliers = self._get_multiplied_columns(meta, plan)
 
-        output = SamplerOutput.from_config(self.config.output, list(plan.queries))
+        output = SamplerOutput.from_config(self.config.output, plan, meta)
         if create:
-            output.create(meta)
+            output.create()
         insert_order = output.insert_order()
         if truncate:
             output.truncate()
+        output.prepare()
 
         with self.source_engine.execution_options().connect() as conn:
             self._materialize_tables(meta, conn, plan)
@@ -753,7 +855,7 @@ class Sampler:
             )
 
     def _get_multiplied_columns(
-        self, meta: DatabaseMetadata, tables: List[str]
+        self, meta: DatabaseMetadata, plan: SubsetPlan
     ) -> Dict[str, Set[str]]:
         """
         Computes a mapping of tables to the list of columns that should be multiplied.
@@ -773,10 +875,12 @@ class Sampler:
             return {}
 
         result: Dict[str, Set[str]] = {}
-        passthrough_tables = set(self.config.multiplicity.passthrough)
+        ignore_tables = set(plan.passthrough) | set(
+            self.config.multiplicity.ignore_tables
+        )
 
-        for table_name in tables:
-            if table_name in passthrough_tables:
+        for table_name in plan.queries:
+            if table_name in ignore_tables:
                 continue
 
             table = meta.tables[parse_table_name(table_name)]
@@ -796,7 +900,7 @@ class Sampler:
         while True:
             changes = False
 
-            for table_name in tables:
+            for table_name in plan.queries:
                 table = meta.tables[parse_table_name(table_name)]
 
                 cols = result.get(table_name, set())
@@ -805,7 +909,7 @@ class Sampler:
                     dst_mapped = result.get(f"{fk.dst_schema}.{fk.dst_table}", set())
                     cols.update(set(fk.columns) & dst_mapped)
 
-                if cols and table_name in passthrough_tables:
+                if cols and table_name in ignore_tables:
                     raise ValueError(
                         "Passthrough foreign key points to multiplied column"
                     )
@@ -815,7 +919,7 @@ class Sampler:
             if not changes:
                 break
 
-        for table_name in tables:
+        for table_name in plan.queries:
             table = meta.tables[parse_table_name(table_name)]
             col_map = {column.name: column for column in table.table_obj.columns}
 
