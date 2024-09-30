@@ -1,0 +1,89 @@
+dataset: instruments
+
+plan_config:
+  targets:
+    test.owners:
+      in:
+        sample: [1]
+  passthrough:
+  - test.instrument_types
+  select:
+  - test.*
+
+sample_config: {}
+
+expected_plan:
+  passthrough:
+  - test.instrument_types
+  queries:
+    test.instrument_types:
+      statement:
+        from:
+          schema: test
+          table: instrument_types
+        type: select
+    test.instruments:
+      statement:
+        from:
+          schema: test
+          table: instruments
+        type: select
+        where:
+          columns:
+          - owner_id
+          negated: false
+          type: in
+          values:
+            columns:
+            - id
+            from:
+              sampled: true
+              schema: test
+              table: owners
+            type: select
+    test.owners:
+      statement:
+        from:
+          schema: test
+          table: owners
+        type: select
+        where:
+          columns:
+          - sample
+          type: in
+          values:
+          - - 1
+
+expected_sample:
+  test_out.instrument_types:
+  - id: 1
+    name: piano
+  - id: 2
+    name: guitar
+  - id: 3
+    name: horn
+  - id: 4
+    name: triangle
+  - id: 5
+    name: saxophone
+  test_out.instruments:
+  - id: 1
+    instrument_id: 1
+    owner_id: 1
+  - id: 3
+    instrument_id: 5
+    owner_id: 3
+  - id: 4
+    instrument_id: 1
+    owner_id: 1
+  - id: 6
+    instrument_id: 3
+    owner_id: 3
+  test_out.owners:
+  - id: 1
+    name: john
+    sample: 1
+  - id: 3
+    name: richard
+    sample: 1
+

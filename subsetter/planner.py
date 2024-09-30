@@ -96,7 +96,13 @@ class Planner:
                 target=self.config.targets.get(table),
             )
 
-        return SubsetPlan(queries=queries)
+        return SubsetPlan(
+            queries=queries,
+            passthrough=[
+                f"{schema}.{table_name}"
+                for schema, table_name in self.passthrough_tables
+            ],
+        )
 
     def _solve_order(self) -> List[str]:
         """

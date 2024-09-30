@@ -1,3 +1,9 @@
+# v0.4.1
+
+- Added logic to appropriately adjust auto-increment sequence state for postgresql
+- Add `merge` option to database output to attempt to merge sampled data into
+  existing data in the destination database.
+
 # v0.4.0
 
 - Unified config file
