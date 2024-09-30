@@ -531,10 +531,6 @@ class DatabaseOutput(SamplerOutput):
             remapped_table = self.table_remap.get(table)
             if remapped_table:
                 result.append(remapped_table)
-            else:
-                LOGGER.warning(
-                    "Database does not have table %s, will not sample", table
-                )
         return result
 
     def output_result_set(
