@@ -10,7 +10,7 @@ may contain sensitive data.
 
 Similar tools include Tonic.ai's platform and [condenser](https://github.com/TonicAI/condenser).
 This is meant to be a simple CLI tool that overcomes many of the difficulties in
-using `condenser.
+using `condenser`.
 
 ## Limitations
 

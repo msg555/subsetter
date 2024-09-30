@@ -86,7 +86,8 @@ planner:
   # Passthrough tables will be copied in full. Passthrough tables must not have
   # foreign keys pointing to non-passthrough tables. The planner will make no
   # attempt to follow foreign keys involving passthrough tables. Generally
-  # relatively constant, lookup data should be marked as passthrough.
+  # relatively constant, lookup data should be marked as passthrough. Tables
+  # listed here do not need to be listed in the "select" list.
   passthrough:
   - db1.ui_features
 
