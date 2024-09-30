@@ -42,7 +42,7 @@ class Planner:
         LOGGER.info("Scanning schema")
         meta, extra_tables = DatabaseMetadata.from_engine(
             self.engine,
-            self.config.select,
+            self.config.select + self.config.passthrough,
             close_forward=self.config.include_dependencies,
         )
         self.meta = meta
