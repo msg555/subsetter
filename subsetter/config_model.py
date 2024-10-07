@@ -82,6 +82,7 @@ class SamplerConfig(ForbidBaseModel):
     filters: Dict[str, List[FilterConfig]] = {}  # type: ignore
     multiplicity: MultiplicityConfig = MultiplicityConfig()
     infer_foreign_keys: Literal["none", "schema", "all"] = "none"
+    compact_keys: bool = False
 
 
 class SubsetterConfig(ForbidBaseModel):

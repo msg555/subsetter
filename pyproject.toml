@@ -60,6 +60,7 @@ extension-pkg-allow-list = [
 markers = [
     "mysql_live",
     "postgres_live",
+    "sqlite_live",
 ]
 
 [tool.mypy]
