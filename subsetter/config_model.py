@@ -78,11 +78,17 @@ class SamplerConfig(ForbidBaseModel):
         extra_columns: Dict[str, List[str]] = {}
         ignore_primary_key_columns: Dict[str, List[str]] = {}
 
+    class CompactConfig(ForbidBaseModel):
+        primary_keys: bool = False
+        auto_increment_keys: bool = False
+        columns: Dict[str, List[str]] = {}
+        start_key: int = 1
+
     output: OutputType = DirectoryOutputConfig(mode="directory", directory="output")
     filters: Dict[str, List[FilterConfig]] = {}  # type: ignore
     multiplicity: MultiplicityConfig = MultiplicityConfig()
     infer_foreign_keys: Literal["none", "schema", "all"] = "none"
-    compact_keys: bool = False
+    compact: CompactConfig = CompactConfig()
 
 
 class SubsetterConfig(ForbidBaseModel):

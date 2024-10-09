@@ -8,7 +8,10 @@ plan_config:
   select:
   - test.*
 
-sample_config: {}
+sample_config:
+  compact:
+    auto_increment_keys: true
+    start_key: 101
 
 expected_plan:
   queries:
@@ -182,91 +185,91 @@ expected_plan:
           type: or
 
 expected_sample:
-  test_out.users:
-  - id: 1
-    name: john
-  - id: 2
-    name: peter
-  - id: 4
-    name: julia
-  - id: 5
-    name: ashley
-  - id: 6
-    name: daniel
-  test_out.websites:
-  - id: 1
-    url: web1
-  - id: 2
-    url: web2
-  - id: 4
-    url: web4
-  - id: 6
-    url: web6
-  - id: 9
-    url: web9
+  test_out.bookmark:
+  - id: 101
+    user_id: 101
+    website_id: 101
+  - id: 102
+    user_id: 102
+    website_id: 102
+  - id: 103
+    user_id: 104
+    website_id: 103
+  test_out.friends:
+  - friend_a: 101
+    friend_b: 102
+    id: 101
+    sample: 1
+  - friend_a: 103
+    friend_b: 104
+    id: 102
+    sample: 1
+  - friend_a: 103
+    friend_b: 105
+    id: 103
+    sample: 1
+  - friend_a: 103
+    friend_b: null
+    id: 104
+    sample: 1
+  test_out.referal_owners:
+  - id: 101
+    referal_id: 101
+    source_website_id: 101
+  - id: 102
+    referal_id: 106
+    source_website_id: 105
   test_out.referals:
   - count: 13
-    id: 1
-    website_id: 1
+    id: 101
+    website_id: 101
   - count: 18
-    id: 2
-    website_id: 1
+    id: 102
+    website_id: 101
   - count: 99
-    id: 3
-    website_id: 2
+    id: 103
+    website_id: 102
   - count: 15
-    id: 4
-    website_id: 2
+    id: 104
+    website_id: 102
   - count: 7
-    id: 5
-    website_id: 4
+    id: 105
+    website_id: 103
   - count: 2
-    id: 10
-    website_id: 9
-  test_out.referal_owners:
-  - id: 1
-    referal_id: 1
-    source_website_id: 1
-  - id: 5
-    referal_id: 10
-    source_website_id: 9
-  test_out.friends:
-  - friend_a: 1
-    friend_b: 2
-    id: 1
-    sample: 1
-  - friend_a: 4
-    friend_b: 5
-    id: 3
-    sample: 1
-  - friend_a: 4
-    friend_b: 6
-    id: 4
-    sample: 1
-  - friend_a: 4
-    friend_b: null
-    id: 7
-    sample: 1
-  test_out.bookmark:
-  - id: 1
-    user_id: 1
-    website_id: 1
-  - id: 2
-    user_id: 2
-    website_id: 2
-  - id: 4
-    user_id: 5
-    website_id: 4
+    id: 106
+    website_id: 105
+  test_out.users:
+  - id: 101
+    name: john
+  - id: 102
+    name: peter
+  - id: 103
+    name: julia
+  - id: 104
+    name: ashley
+  - id: 105
+    name: daniel
   test_out.visits:
   - count: 10
-    id: 1
-    user_id: 1
-    website_id: 9
+    id: 101
+    user_id: 101
+    website_id: 105
   - count: 100
-    id: 4
-    user_id: 4
-    website_id: 6
+    id: 102
+    user_id: 103
+    website_id: 104
   - count: 555
-    id: 5
-    user_id: 5
-    website_id: 2
+    id: 103
+    user_id: 104
+    website_id: 102
+  test_out.websites:
+  - id: 101
+    url: web1
+  - id: 102
+    url: web2
+  - id: 103
+    url: web4
+  - id: 104
+    url: web6
+  - id: 105
+    url: web9

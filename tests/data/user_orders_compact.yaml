@@ -1,0 +1,94 @@
+dataset: user_orders
+
+plan_config:
+  targets:
+    test.users:
+      in:
+        sample: [1, 99]
+  select:
+  - test.*
+
+sample_config:
+  compact:
+    auto_increment_keys: true
+
+expected_plan:
+  queries:
+    test.order_status:
+      materialize: false
+      statement:
+        from:
+          schema: test
+          table: order_status
+        type: select
+        where:
+          columns:
+          - order_id
+          type: in
+          values:
+            columns:
+            - id
+            from:
+              sampled: true
+              schema: test
+              table: orders
+            type: select
+    test.orders:
+      materialize: true
+      statement:
+        from:
+          schema: test
+          table: orders
+        type: select
+        where:
+          columns:
+          - user_id
+          type: in
+          values:
+            columns:
+            - id
+            from:
+              sampled: true
+              schema: test
+              table: users
+            type: select
+    test.users:
+      materialize: true
+      statement:
+        type: select
+        from:
+          schema: test
+          table: users
+        where:
+          type: in
+          columns: [sample]
+          values: [[1], [99]]
+
+expected_sample:
+  test_out.users:
+    - id: 1
+      name: john
+      sample: 1
+    - id: 2
+      name: richard
+      sample: 1
+  test_out.orders:
+    - id: 1
+      user_id: 1
+      name: stuff
+    - id: 2
+      user_id: 2
+      name: gold
+  test_out.order_status:
+    - id: 1
+      order_id: 1
+      info: pending
+      order_square: 1
+    - id: 2
+      order_id: 1
+      info: sent
+      order_square: 1
+    - id: 3
+      order_id: 2
+      info: lost
+      order_square: 9

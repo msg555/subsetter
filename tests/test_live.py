@@ -89,6 +89,11 @@ def test_user_orders(db_config):
 
 
 @pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
+def test_user_orders_compact(db_config):
+    do_dataset_test(db_config, "user_orders_compact")
+
+
+@pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
 def test_data_types(db_config):
     do_dataset_test(db_config, "data_types")
 
@@ -96,6 +101,11 @@ def test_data_types(db_config):
 @pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
 def test_fk_chain(db_config):
     do_dataset_test(db_config, "fk_chain")
+
+
+@pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
+def test_fk_chain_compact(db_config):
+    do_dataset_test(db_config, "fk_chain_compact")
 
 
 @pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)

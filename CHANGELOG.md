@@ -1,3 +1,9 @@
+# v0.4.2
+
+- Refactored temporary table creation to use sqlalchemy constructs
+- Ensured temporary tables created with primary key if source table had one
+- Added ID compaction functionality
+
 # v0.4.1
 
 - Added logic to appropriately adjust auto-increment sequence state for postgresql

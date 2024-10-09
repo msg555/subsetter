@@ -300,3 +300,26 @@ sampler:
   # single-column primary key in another table.
   infer_foreign_keys: none # can be 'none', 'schema', or 'all'
 
+  # Compaction refers to removing gaps in the sampled ID space of a specific
+  # table in a column. In most cases this is unnecessary but sometimes it can
+  # be helpful to keep the IDs in the sampled dataset small. Enabling compaction
+  # can require more tables to be materialized on the source database and can
+  # have some mild performance impacts on sampling.
+  compact:
+    # If set to true any tables that have single-column, integral primary key
+    # will have their primary key marked for compaction.
+    primary_keys: false
+
+    # If set to true any tables that have single-column, integral,
+    # auto-increment primary key will have their primary key marked for
+    # compaction.
+    auto_increment_keys: false
+
+    # Mapping of additional columns that should be compacted if needed. Note if
+    # multiple columns in the same table are compacted they will end up having
+    # the same value.
+    columns:
+      db1.gizmo: [extra_id]
+
+    # Minimum ID to set of the first sampled row for a table.
+    start_key: 1
