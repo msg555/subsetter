@@ -12,6 +12,20 @@ Similar tools include Tonic.ai's platform and [condenser](https://github.com/Ton
 This is meant to be a simple CLI tool that overcomes many of the difficulties in
 using `condenser`.
 
+## Installation
+
+You can use subsetter by installing it through pip:
+
+```sh
+pip install subsetter
+```
+
+Or by using the published `msg555/subsetter` image:
+
+```sh
+docker run --rm -v "./subsetter.yaml:/tmp/subsetter.yaml" msg555/subsetter -c /tmp/subsetter.yaml subset
+```
+
 ## Limitations
 
 The subsetter tool takes an approach of "one table, one query". This means that

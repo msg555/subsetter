@@ -13,6 +13,10 @@ source:
     - SET @@session.wait_timeout=28800
     - SET @@session.innodb_lock_wait_timeout=3600
 
+  # Set transaction isolation level. Defaults to 'READ COMMITTED' (SERIALIZABLE
+  # for sqlite).
+  isolation_level: "READ COMMITTED"
+
   # For engines where it applies specify database name to connect to as well.
   # database: my_dbname # deafults to SUBSET_SOURCE_DATABASE
 
