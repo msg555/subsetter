@@ -62,16 +62,9 @@ subsetter --config my-config.yaml sample --plan my-plan.yaml --create --truncate
 The sampling process proceeds in four phases:
 
 1. If `--create` is specified it will attempt to create any missing tables. Existing tables will not be touched even if the schema does not match what is expected.
-2. If `--truncate` is specified any tables about to be sampled will be first truncated.
-3. Any sampled tables that are referenced by other tables will first be
-materialized into temporary tables on the source database.
+2. If `--truncate` is specified any tables about to be sampled will be first truncated. subsetter expects there to be no existing data in the destination database unless configured to run in _merge_ mode.
+3. Any sampled tables that are referenced by other tables will first be materialized into temporary tables on the source database.
 4. Data is copied for each table from the source to destination.
-
-The sampler also supports filters which allow you to transform and anonymize your
-data using simple column filters. Check the [example](subsetter.example.yaml) config's
-'sampler.filters' section for more details on what filters are available and how to
-configure them. If needed, custom Python plugins can be used to perform
-arbitrary transformations.
 
 ## Plan and sample in one action
 
@@ -84,7 +77,63 @@ each.
 subsetter -c my-config.yaml subset --create --truncate
 ```
 
-# Sampling Multiplicity
+# Sample Transformations
+
+By default any sampled row is copied directly from the source database to the
+destination database. However, there are several transformation steps that can
+be configured at the sampling stage that can change this behavior.
+
+## Filtering
+
+Filters allow you to transform the columns in each sampled row using either a
+set of built-in filters or through custom plugins. Built in filters allow you to
+easily replace common sources of personally identifiable information with fake
+data using the [faker](https://faker.readthedocs.io/en/master/) library. Filters
+for name, email, phone number, address, and location, and more come built in.
+See [subsetter.example.yaml](subsetter.example.yaml) for full details on what
+filters exist and how to create a custom filter plugin.
+
+## Identifier Compaction
+
+Often tables make use of auto-incrementing integer identifiers to function as
+their primary key. Sometimes we may want the identifiers in our sampled data
+to be compact -- instead of retaining the value in the source database we may
+want our N sampled rows to have identifiers ranging from 1 to N. This is useful
+for sample data where we want to keep the identifiers easy to reference.
+
+Any other table that has a foreign key that references one of these compacted
+columns will automatically also have the column involved in that foreign key
+adjusted to maintain semantic consistency.
+
+Note that enabling compaction can have a noticable impact on performance.
+Compaction both requires more tables to be materialized on the source database
+and requries more joins when streaming data into the destination database.
+
+## Merging
+
+By default the sampler expects no data to exist in the destination database.
+To get around this constraint we can turn on "merge" mode. To use merge mode all
+sampled tables must be either marked as "passthrough" or have a single-column,
+non-negative, integral primary key.
+
+When enabled, the sampler will calculate the largest existing primary key
+identifier for each non-passthrough table and automatically shift the primary
+key of each sampled row to be larger using the equation:
+
+```
+new_id = source_id + max(0, existing_ids...) + 1
+```
+
+Passthrough tables instead will be sampled as normal except they will use the
+'skip' conflict strategy which will have the effect of only inserting rows in
+a passthrough table if no row with the matching primary key exists in the
+destination database.
+
+If merging multiple times it may be necessary to turn on identifier compaction
+to avoid the largest identifier in each table from growing too quickly due to
+large gaps.
+
+## Multiplicity
 
 Sampling usually means condensing a large dataset into a semantically consistent
 small dataset. However, there are times that what you really want to do is

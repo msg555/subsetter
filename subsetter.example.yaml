@@ -155,12 +155,12 @@ sampler:
     # If merge is enabled subsetter will attempt to merge sampled data into
     # existing tables. Passthrough tables will be inserted as normal except
     # it will use the 'skip' conflict strategy. All other tables must have a
-    # single-column, integral primary key.
+    # single-column, non-negative, integral primary key.
     #
     # Non-passthrough tables will have their primary keys remapped using the
     # below equation:
     #
-    #   new_id = source_id + max(0, existing_pks...) + 1
+    #   new_id = source_id + max(0, existing_ids...) + 1
     merge: false
 
   # Alternative configuration to output JSON files within a directory
