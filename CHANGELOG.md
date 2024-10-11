@@ -1,3 +1,7 @@
+# v0.4.3
+
+- Fix issue where passthrough table columns could be marked for compaction
+
 # v0.4.2
 
 - Refactored temporary table creation to use sqlalchemy constructs

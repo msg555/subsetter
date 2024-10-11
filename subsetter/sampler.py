@@ -691,6 +691,7 @@ class Sampler:
         self.source_engine = source.database_engine(env_prefix="SUBSET_SOURCE_")
         self.compact_columns: Dict[Tuple[str, str], Set[str]] = {}
         self.temp_tables = TempTableCreator()
+        self.passthrough_tables: Set[str] = set()
 
     def sample(
         self,
@@ -699,6 +700,7 @@ class Sampler:
         truncate: bool = False,
         create: bool = False,
     ) -> None:
+        self.passthrough_tables = set(plan.passthrough)
         meta, _ = DatabaseMetadata.from_engine(self.source_engine, list(plan.queries))
         if self.config.infer_foreign_keys != "none":
             meta.infer_missing_foreign_keys(
@@ -740,6 +742,11 @@ class Sampler:
                     "Table %s has columns configured for compaction but is not found",
                     table,
                 )
+            elif table in self.passthrough_tables:
+                LOGGER.warning(
+                    "Cannot compact columns on passthrough table %s",
+                    table,
+                )
             else:
                 compact_columns[table_key] = set(cols)
 
@@ -751,6 +758,8 @@ class Sampler:
 
         for table_key, table_meta in meta.tables.items():
             if len(table_meta.primary_key) != 1:
+                continue
+            if f"{table_key[0]}.{table_key[1]}" in self.passthrough_tables:
                 continue
 
             col = table_meta.table_obj.columns[table_meta.primary_key[0]]
