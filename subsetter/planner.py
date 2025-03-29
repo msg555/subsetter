@@ -138,22 +138,56 @@ class Planner:
 
     def _add_extra_fks(self) -> None:
         """Add in additional foreign keys requested."""
-        for extra_fk in self.config.extra_fks:
+        for index, extra_fk in enumerate(self.config.extra_fks):
             src_schema, src_table_name = parse_table_name(extra_fk.src_table)
             dst_schema, dst_table_name = parse_table_name(extra_fk.dst_table)
             table = self.meta.tables.get((src_schema, src_table_name))
             if table is None:
                 LOGGER.warning(
-                    "Found no source table %s.%s referenced in add_extra_fks",
+                    "Found no source table %s.%s referenced in extra_fks[%d]",
                     src_schema,
                     src_table_name,
+                    index,
                 )
                 continue
-            if (dst_schema, dst_table_name) not in self.meta.tables:
+
+            src_missing_cols = {
+                col
+                for col in extra_fk.src_columns
+                if col not in table.table_obj.columns
+            }
+            if src_missing_cols:
                 LOGGER.warning(
-                    "Found no destination table %s.%s referenced in add_extra_fks",
+                    "Columns %s do not exist in %s.%s referenced in extra_fks[%d]",
+                    src_missing_cols,
+                    src_schema,
+                    src_table_name,
+                    index,
+                )
+                continue
+
+            dst_table = self.meta.tables.get((dst_schema, dst_table_name))
+            if dst_table is None:
+                LOGGER.warning(
+                    "Found no destination table %s.%s referenced in add_extra_fks[%d]",
                     dst_schema,
                     dst_table_name,
+                    index,
+                )
+                continue
+
+            dst_missing_cols = {
+                col
+                for col in extra_fk.dst_columns
+                if col not in dst_table.table_obj.columns
+            }
+            if dst_missing_cols:
+                LOGGER.warning(
+                    "Columns %s do not exist in %s.%s referenced in extra_fks[%d]",
+                    dst_missing_cols,
+                    dst_schema,
+                    dst_table_name,
+                    index,
                 )
                 continue
 

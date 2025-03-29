@@ -1,6 +1,6 @@
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing_extensions import Annotated
 
 from subsetter.common import DatabaseConfig, SQLKnownOperator, SQLLiteralType
@@ -29,6 +29,19 @@ class PlannerConfig(ForbidBaseModel):
         src_columns: List[str]
         dst_table: str
         dst_columns: List[str]
+
+        @model_validator(mode="after")
+        def check_columns_match(self):
+            col_count = len(self.src_columns)
+            if not col_count:
+                raise ValueError("src_columns cannot be empty")
+            if len(self.dst_columns) != col_count:
+                raise ValueError("src_columns and dst_columns must be the same length")
+            if len(set(self.src_columns)) != col_count:
+                raise ValueError("each column in src_columns must be unique")
+            if len(set(self.dst_columns)) != col_count:
+                raise ValueError("each column in src_columns must be unique")
+            return self
 
     class ColumnConstraint(ForbidBaseModel):
         column: str
