@@ -692,6 +692,7 @@ class Sampler:
         self.compact_columns: Dict[Tuple[str, str], Set[str]] = {}
         self.temp_tables = TempTableCreator()
         self.passthrough_tables: Set[str] = set()
+        self.cached_table_sizes: Dict[Tuple[str, str], int] = {}
 
     def sample(
         self,
@@ -866,6 +867,7 @@ class Sampler:
                     primary_key=table.primary_key,
                 )
             )
+            self.cached_table_sizes[(schema, table_name)] = rowcount
             LOGGER.info(
                 "Materialized %d rows for %s.%s in temporary table",
                 rowcount,
@@ -1005,9 +1007,9 @@ class Sampler:
 
             rows = 0
 
-            def _count_rows(result):
+            def _count_rows(result, total: Optional[int]):
                 nonlocal rows
-                for row in tqdm(result, desc="row progress", unit="rows"):
+                for row in tqdm(result, total=total, desc="row progress", unit="rows"):
                     # result_processor
                     rows += 1
                     yield row
@@ -1017,7 +1019,7 @@ class Sampler:
                 schema,
                 table_name,
                 columns,
-                _count_rows(result),
+                _count_rows(result, self.cached_table_sizes.get((schema, table_name))),
                 filter_view=filter_view,
                 multiplier=(
                     1
