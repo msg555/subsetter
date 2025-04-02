@@ -232,12 +232,21 @@ SQLWhereClause = Annotated[
 ]
 
 
+class SQLLeftJoin(BaseModel):
+    right: SQLTableIdentifier
+    left_columns: List[str]
+    right_columns: List[str]
+    half_unique: bool = True
+
+
 class SQLStatementSelect(BaseModel):
     type_: Literal["select"] = Field(..., alias="type")
     columns: Optional[List[str]] = None
     from_: SQLTableIdentifier = Field(..., alias="from")
     where: Optional[SQLWhereClause] = None
     limit: Optional[int] = None
+    joins: Optional[List[SQLLeftJoin]] = None
+    joins_outer: bool = False
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -249,6 +258,48 @@ class SQLStatementSelect(BaseModel):
             stmt = sa.select(*(table_obj.columns[column] for column in self.columns))
         else:
             stmt = sa.select(table_obj)
+
+        if self.joins:
+            joined_cols: List[sa.ColumnExpression] = []
+            joined: sa.FromClause = table_obj
+            exists_constraints: List[sa.ColumnExpressionArgument] = []
+            for join in self.joins:  # pylint: disable=not-an-iterable
+                right = join.right.build(context).alias()
+
+                if join.half_unique:
+                    joined = joined.join(
+                        right,
+                        onclause=sa.and_(
+                            *(
+                                table_obj.c[lft_col] == right.c[rht_col]
+                                for lft_col, rht_col in zip(
+                                    join.left_columns, join.right_columns
+                                )
+                            )
+                        ),
+                        isouter=self.joins_outer,
+                    )
+                    joined_cols.extend(
+                        right.c[rht_col] for rht_col in join.right_columns
+                    )
+                else:
+                    exists_constraints.append(
+                        sa.exists().where(
+                            *(
+                                table_obj.c[lft_col] == right.c[rht_col]
+                                for lft_col, rht_col in zip(
+                                    join.left_columns, join.right_columns
+                                )
+                            )
+                        )
+                    )
+
+            stmt = stmt.select_from(joined).distinct()
+            if self.joins_outer:
+                exists_constraints.extend(col.is_not(None) for col in joined_cols)
+                stmt = stmt.where(sa.or_(*exists_constraints))
+            elif exists_constraints:
+                stmt = stmt.where(sa.and_(*exists_constraints))
 
         if self.where:
             stmt = stmt.where(self.where.build(context, table_obj))
@@ -273,6 +324,10 @@ class SQLStatementSelect(BaseModel):
             kwargs["columns"] = self.columns
         if self.limit is not None:
             kwargs["limit"] = self.limit
+        if self.joins:
+            kwargs["joins"] = self.joins
+            kwargs["joins_outer"] = self.joins_outer
+
         return SQLStatementSelect(**kwargs)  # type: ignore
 
 

@@ -111,3 +111,8 @@ def test_fk_chain_compact(db_config):
 @pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
 def test_instruments(db_config):
     do_dataset_test(db_config, "instruments")
+
+
+@pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
+def test_big_join(db_config):
+    do_dataset_test(db_config, "big_join")
