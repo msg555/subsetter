@@ -123,10 +123,12 @@ class TempTableCreator:
                 raise
 
         # Copy data into the temporary table
-        result = conn.execute(
-            table_obj.insert().from_select(list(table_obj.columns), select)
+        stmt = table_obj.insert().from_select(list(table_obj.columns), select)
+        LOGGER.debug(
+            "  Using statement %s",
+            str(stmt.compile(dialect=conn.engine.dialect)).replace("\n", " "),
         )
-        result = conn.execute(table_obj.select())
+        result = conn.execute(stmt)
 
         return table_obj, result.rowcount
 

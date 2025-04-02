@@ -130,10 +130,13 @@ def get_rows(db_config, schema: str, table: str) -> List[Dict[str, Any]]:
     with engine.connect() as conn:
         metadata_obj = sa.MetaData()
         table_obj = sa.Table(table, metadata_obj, schema=schema, autoload_with=conn)
-        return [
-            {str(key): val for key, val in row.items()}
-            for row in conn.execute(sa.select(table_obj)).mappings()
-        ]
+        return sorted(
+            (
+                {str(key): val for key, val in row.items()}
+                for row in conn.execute(sa.select(table_obj)).mappings()
+            ),
+            key=lambda x: tuple(x.values()),
+        )
 
 
 def do_dataset_test(db_config: DatabaseConfig, test_name: str) -> None:
