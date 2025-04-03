@@ -1,0 +1,33 @@
+tables:
+  test.users:
+    primary_key: [id]
+    columns: [id, name|str, state|str]
+  test.homes:
+    primary_key: [id]
+    columns: [id, name|str, state|str]
+
+data:
+  test.users:
+    - [1, john, MI]
+    - [2, peter, WI]
+    - [3, richard, CA]
+    - [4, jeff, NY]
+    - [5, ashley, MI]
+    - [6, corey, MI]
+    - [7, teresa, MI]
+    - [8, jake, MI]
+    - [9, erin, WI]
+    - [10, holly, CA]
+  test.homes:
+    - [1, home1, MI]
+    - [2, home2, MI]
+    - [3, home3, WI]
+    - [4, home4, MI]
+    - [5, home5, MI]
+    - [6, home6, WI]
+    - [7, home7, MI]
+    - [8, home8, MI]
+    - [9, home9, NY]
+    - [10, home10, OR]
+    - [11, home11, CA]
+    - [12, home12, CA]

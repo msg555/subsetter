@@ -20,20 +20,18 @@ expected_plan:
         from:
           schema: test
           table: bookmark
-        type: select
-        where:
-          columns:
+        joins:
+        - half_unique: true
+          left_columns:
           - user_id
-          negated: false
-          type: in
-          values:
-            columns:
-            - id
-            from:
-              sampled: true
-              schema: test
-              table: users
-            type: select
+          right:
+            sampled: true
+            schema: test
+            table: users
+          right_columns:
+          - id
+        joins_outer: false
+        type: select
     test.friends:
       statement:
         from:
@@ -51,138 +49,113 @@ expected_plan:
         from:
           schema: test
           table: referal_owners
+        joins:
+        - half_unique: true
+          left_columns:
+          - referal_id
+          right:
+            sampled: true
+            schema: test
+            table: referals
+          right_columns:
+          - id
+        - half_unique: true
+          left_columns:
+          - source_website_id
+          right:
+            sampled: true
+            schema: test
+            table: websites
+          right_columns:
+          - id
+        joins_outer: false
         type: select
-        where:
-          conditions:
-          - columns:
-            - referal_id
-            negated: false
-            type: in
-            values:
-              columns:
-              - id
-              from:
-                sampled: true
-                schema: test
-                table: referals
-              type: select
-          - columns:
-            - source_website_id
-            negated: false
-            type: in
-            values:
-              columns:
-              - id
-              from:
-                sampled: true
-                schema: test
-                table: websites
-              type: select
-          type: and
     test.referals:
       statement:
         from:
           schema: test
           table: referals
-        type: select
-        where:
-          columns:
+        joins:
+        - half_unique: true
+          left_columns:
           - website_id
-          negated: false
-          type: in
-          values:
-            columns:
-            - id
-            from:
-              sampled: true
-              schema: test
-              table: websites
-            type: select
+          right:
+            sampled: true
+            schema: test
+            table: websites
+          right_columns:
+          - id
+        joins_outer: false
+        type: select
     test.users:
       statement:
         from:
           schema: test
           table: users
+        joins:
+        - half_unique: true
+          left_columns:
+          - id
+          right:
+            sampled: true
+            schema: test
+            table: friends
+          right_columns:
+          - friend_a
+        - half_unique: true
+          left_columns:
+          - id
+          right:
+            sampled: true
+            schema: test
+            table: friends
+          right_columns:
+          - friend_b
+        joins_outer: true
         type: select
-        where:
-          conditions:
-          - columns:
-            - id
-            negated: false
-            type: in
-            values:
-              columns:
-              - friend_a
-              from:
-                sampled: true
-                schema: test
-                table: friends
-              type: select
-          - columns:
-            - id
-            negated: false
-            type: in
-            values:
-              columns:
-              - friend_b
-              from:
-                sampled: true
-                schema: test
-                table: friends
-              type: select
-          type: or
     test.visits:
       statement:
         from:
           schema: test
           table: visits
-        type: select
-        where:
-          columns:
+        joins:
+        - half_unique: true
+          left_columns:
           - user_id
-          negated: false
-          type: in
-          values:
-            columns:
-            - id
-            from:
-              sampled: true
-              schema: test
-              table: users
-            type: select
+          right:
+            sampled: true
+            schema: test
+            table: users
+          right_columns:
+          - id
+        joins_outer: false
+        type: select
     test.websites:
       statement:
         from:
           schema: test
           table: websites
+        joins:
+        - half_unique: true
+          left_columns:
+          - id
+          right:
+            sampled: true
+            schema: test
+            table: bookmark
+          right_columns:
+          - website_id
+        - half_unique: true
+          left_columns:
+          - id
+          right:
+            sampled: true
+            schema: test
+            table: visits
+          right_columns:
+          - website_id
+        joins_outer: true
         type: select
-        where:
-          conditions:
-          - columns:
-            - id
-            negated: false
-            type: in
-            values:
-              columns:
-              - website_id
-              from:
-                sampled: true
-                schema: test
-                table: bookmark
-              type: select
-          - columns:
-            - id
-            negated: false
-            type: in
-            values:
-              columns:
-              - website_id
-              from:
-                sampled: true
-                schema: test
-                table: visits
-              type: select
-          type: or
 
 expected_sample:
   test_out.bookmark:

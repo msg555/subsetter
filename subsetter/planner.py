@@ -1,10 +1,13 @@
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
+
+import sqlalchemy as sa
 
 from subsetter.common import DatabaseConfig, parse_table_name
 from subsetter.config_model import PlannerConfig
 from subsetter.metadata import DatabaseMetadata, ForeignKey, TableMetadata
 from subsetter.plan_model import (
+    SQLLeftJoin,
     SQLStatementSelect,
     SQLStatementUnion,
     SQLTableIdentifier,
@@ -13,7 +16,6 @@ from subsetter.plan_model import (
     SQLWhereClauseAnd,
     SQLWhereClauseIn,
     SQLWhereClauseOperator,
-    SQLWhereClauseOr,
     SQLWhereClauseRandom,
     SQLWhereClauseSQL,
     SubsetPlan,
@@ -267,8 +269,6 @@ class Planner:
         processed: Set[Tuple[str, str]],
         target: Optional[PlannerConfig.TargetConfig] = None,
     ) -> SQLTableQuery:
-        fk_constraints: List[SQLWhereClause] = []
-
         foreign_keys = sorted(
             fk
             for fk in table.foreign_keys
@@ -311,33 +311,34 @@ class Planner:
                 [f"{fk.dst_schema}.{fk.dst_table}" for fk in rev_foreign_keys],
             )
 
-        fk_constraints = [
-            SQLWhereClauseIn(
-                type_="in",
-                columns=list(fk.columns),
-                values=SQLStatementSelect(
-                    type_="select",
-                    columns=list(fk.dst_columns),
-                    from_=SQLTableIdentifier(
+        def _is_distinct(table_obj: sa.Table, cols: Iterable[str]) -> bool:
+            cols_st = set(cols)
+            for constraint in table_obj.constraints:
+                if isinstance(
+                    constraint, (sa.PrimaryKeyConstraint, sa.UniqueConstraint)
+                ):
+                    constraint_cols = set(col.name for col in constraint.columns)
+                    if constraint_cols <= cols_st:
+                        return True
+            return False
+
+        fk_joins = []
+        for fk in foreign_keys or rev_foreign_keys:
+            dst_table = self.meta.tables[(fk.dst_schema, fk.dst_table)]
+            half_unique = _is_distinct(table.table_obj, fk.columns) or _is_distinct(
+                dst_table.table_obj, fk.dst_columns
+            )
+            fk_joins.append(
+                SQLLeftJoin(
+                    right=SQLTableIdentifier(
                         table_schema=fk.dst_schema,
                         table_name=fk.dst_table,
                         sampled=True,
                     ),
-                ),
-            )
-            for fk in foreign_keys or rev_foreign_keys
-        ]
-
-        fk_constraint: SQLWhereClause
-        if foreign_keys:
-            fk_constraint = SQLWhereClauseAnd(
-                type_="and",
-                conditions=fk_constraints,
-            )
-        else:
-            fk_constraint = SQLWhereClauseOr(
-                type_="or",
-                conditions=fk_constraints,
+                    left_columns=list(fk.columns),
+                    right_columns=list(fk.dst_columns),
+                    half_unique=half_unique,
+                )
             )
 
         conf_constraints = self.config.table_constraints.get(
@@ -365,23 +366,25 @@ class Planner:
                 )
             )
 
+        statements: List[SQLStatementSelect] = []
+
         # Calculate initial foreign-key / config constraint statement
-        statements: List[SQLStatementSelect] = [
-            SQLStatementSelect(
-                type_="select",
-                from_=SQLTableIdentifier(
-                    table_schema=table.schema,
-                    table_name=table.name,
-                ),
-                where=SQLWhereClauseAnd(
-                    type_="and",
-                    conditions=[
-                        *conf_constraints_sql,
-                        fk_constraint,
-                    ],
-                ),
+        if foreign_keys or rev_foreign_keys:
+            statements.append(
+                SQLStatementSelect(
+                    type_="select",
+                    from_=SQLTableIdentifier(
+                        table_schema=table.schema,
+                        table_name=table.name,
+                    ),
+                    joins=fk_joins,
+                    joins_outer=not foreign_keys,
+                    where=SQLWhereClauseAnd(
+                        type_="and",
+                        conditions=conf_constraints_sql,
+                    ),
+                )
             )
-        ]
 
         # If targetted also calculate target constraint statement
         if target:

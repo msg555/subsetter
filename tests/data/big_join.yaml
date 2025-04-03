@@ -1,0 +1,98 @@
+dataset: big_join
+
+plan_config:
+  targets:
+    test.homes:
+      in:
+        state: [MI, CA]
+  extra_fks:
+  - src_table: test.homes
+    src_columns: [state]
+    dst_table: test.users
+    dst_columns: [state]
+  select:
+  - test.*
+
+sample_config: {}
+
+expected_plan:
+  queries:
+    test.homes:
+      statement:
+        from:
+          schema: test
+          table: homes
+        type: select
+        where:
+          columns:
+          - state
+          type: in
+          values:
+          - - MI
+          - - CA
+    test.users:
+      statement:
+        from:
+          schema: test
+          table: users
+        joins:
+        - half_unique: false
+          left_columns:
+          - state
+          right:
+            sampled: true
+            schema: test
+            table: homes
+          right_columns:
+          - state
+        joins_outer: true
+        type: select
+
+expected_sample:
+  test_out.homes:
+  - id: 1
+    name: home1
+    state: MI
+  - id: 2
+    name: home2
+    state: MI
+  - id: 4
+    name: home4
+    state: MI
+  - id: 5
+    name: home5
+    state: MI
+  - id: 7
+    name: home7
+    state: MI
+  - id: 8
+    name: home8
+    state: MI
+  - id: 11
+    name: home11
+    state: CA
+  - id: 12
+    name: home12
+    state: CA
+  test_out.users:
+  - id: 1
+    name: john
+    state: MI
+  - id: 3
+    name: richard
+    state: CA
+  - id: 5
+    name: ashley
+    state: MI
+  - id: 6
+    name: corey
+    state: MI
+  - id: 7
+    name: teresa
+    state: MI
+  - id: 8
+    name: jake
+    state: MI
+  - id: 10
+    name: holly
+    state: CA
