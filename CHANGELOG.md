@@ -1,3 +1,10 @@
+# v0.4.4
+
+- Improved query performance following foreign key relationships
+- Improved progress bar (if tqdm installed) when sampling materialized tables
+- Added extra config error checking, better error messages
+- Make triple verbose (-vvv) turn on SQL engine echo
+
 # v0.4.3
 
 - Fix issue where passthrough table columns could be marked for compaction
