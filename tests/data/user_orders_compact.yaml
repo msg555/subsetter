@@ -15,54 +15,52 @@ sample_config:
 expected_plan:
   queries:
     test.order_status:
-      materialize: false
       statement:
         from:
           schema: test
           table: order_status
-        type: select
-        where:
-          columns:
+        joins:
+        - half_unique: true
+          left_columns:
           - order_id
-          type: in
-          values:
-            columns:
-            - id
-            from:
-              sampled: true
-              schema: test
-              table: orders
-            type: select
+          right:
+            sampled: true
+            schema: test
+            table: orders
+          right_columns:
+          - id
+        joins_outer: false
+        type: select
     test.orders:
-      materialize: true
       statement:
         from:
           schema: test
           table: orders
-        type: select
-        where:
-          columns:
+        joins:
+        - half_unique: true
+          left_columns:
           - user_id
-          type: in
-          values:
-            columns:
-            - id
-            from:
-              sampled: true
-              schema: test
-              table: users
-            type: select
-    test.users:
-      materialize: true
-      statement:
+          right:
+            sampled: true
+            schema: test
+            table: users
+          right_columns:
+          - id
+        joins_outer: false
         type: select
+    test.users:
+      statement:
         from:
           schema: test
           table: users
+        type: select
         where:
+          columns:
+          - sample
           type: in
-          columns: [sample]
-          values: [[1], [99]]
+          values:
+          - - 1
+          - - 99
 
 expected_sample:
   test_out.users:
