@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel
@@ -217,3 +217,35 @@ class DatabaseConfig(BaseModel):
                 cursor.close()
 
         return engine
+
+
+def pydantic_search(root: Any) -> Iterable[BaseModel]:
+    """
+    A generator that yields all sub-models found underneath the passed root object (including the
+    root object itself). Searches model fields as well as through lists and dicts found in those
+    fields.
+    """
+    vis = set()
+    stack = []
+
+    def _push(key: Any, value: Any):
+        if isinstance(value, (BaseModel, list, dict)):
+            if id(value) not in vis:
+                vis.add(id(value))
+                stack.append(value)
+
+    _push(None, root)
+    while stack:
+        data = stack.pop()
+        if isinstance(data, BaseModel):
+            yield data
+            for field, _ in data.model_fields.items():
+                _push(field, getattr(data, field))
+
+        if isinstance(data, list):
+            for idx, elem in enumerate(data):
+                _push(idx, elem)
+
+        if isinstance(data, dict):
+            for key, elem in data.items():
+                _push(key, elem)
