@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from subsetter.config_model import SubsetterConfig
+from subsetter.config_model import DatabaseOutputConfig, SubsetterConfig
 from subsetter.plan_model import SubsetPlan
 from subsetter.planner import Planner
 from subsetter.sampler import Sampler
@@ -128,7 +128,7 @@ def _get_config(args) -> SubsetterConfig:
                     exc_info=args.verbose > 1,
                 )
                 sys.exit(1)
-        return SubsetterConfig.model_validate(config_data)
+        config = SubsetterConfig.model_validate(config_data)
     except ValueError as exc:
         LOGGER.error(
             "Unexpected subsetter config file format: %s",
@@ -136,6 +136,13 @@ def _get_config(args) -> SubsetterConfig:
             exc_info=args.verbose > 1,
         )
         sys.exit(1)
+
+    if args.verbose > 2:
+        config.source.echo = True
+        if config.sampler and isinstance(config.sampler.output, DatabaseOutputConfig):
+            config.sampler.output.echo = True
+
+    return config
 
 
 def _main_plan(args):

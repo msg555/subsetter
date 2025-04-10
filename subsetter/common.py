@@ -164,6 +164,7 @@ class DatabaseConfig(BaseModel):
     sqlite_databases: Optional[Dict[str, str]] = {}
     isolation_level: Optional[IsolationLevel] = None
     ssl: SSLConfig = SSLConfig()
+    echo: bool = False
 
     def database_url(
         self,
@@ -198,6 +199,7 @@ class DatabaseConfig(BaseModel):
                 self.dialect or DEFAULT_DIALECT,
                 env_prefix=env_prefix,
             ),
+            echo=self.echo,
         )
 
         @sa.event.listens_for(engine, "connect")
