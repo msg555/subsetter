@@ -266,7 +266,7 @@ class SQLStatementSelect(BaseModel):
             for join in self.joins:  # pylint: disable=not-an-iterable
                 right = join.right.build(context).alias()
 
-                if join.half_unique:
+                if join.half_unique and table_obj.primary_key:
                     joined = joined.join(
                         right,
                         onclause=sa.and_(
@@ -294,7 +294,10 @@ class SQLStatementSelect(BaseModel):
                         )
                     )
 
-            stmt = stmt.select_from(joined).distinct()
+            stmt = stmt.select_from(joined)
+            if joined is not table_obj:
+                stmt = stmt.group_by(*table_obj.primary_key.columns)
+
             if self.joins_outer:
                 exists_constraints.extend(col.is_not(None) for col in joined_cols)
                 stmt = stmt.where(sa.or_(*exists_constraints))

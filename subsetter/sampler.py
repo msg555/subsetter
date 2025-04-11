@@ -70,6 +70,7 @@ class TempTableCreator:
         select: sa.Select,
         *,
         name: str = "",
+        primary_key: Tuple[str, ...] = (),
         indexes: Iterable[Tuple[str, ...]] = (),
     ) -> Tuple[sa.Table, int]:
         """
@@ -83,6 +84,9 @@ class TempTableCreator:
             schema: The schema to create the temporary table within. For some dialects
                     temporary tables always exist in their own schema and this parameter
                     will be ignored.
+            primary_key: If set will mark the set of columns passed as primary keys in
+                         the temporary table. This tuple should match a subset of the
+                         column names in the select query.
             indexes: creates an index on each tuple of columns listed. This is useful
                      if future queries are likely to reference these columns.
 
@@ -106,7 +110,10 @@ class TempTableCreator:
             metadata,
             schema=temp_schema,
             prefixes=["TEMPORARY"],
-            *(sa.Column(col.name, col.type) for col in select.selected_columns),
+            *(
+                sa.Column(col.name, col.type, primary_key=col.name in primary_key)
+                for col in select.selected_columns
+            ),
         )
         try:
             metadata.create_all(conn)
@@ -120,6 +127,8 @@ class TempTableCreator:
                 raise
 
         for idx, index_cols in enumerate(indexes):
+            if index_cols == primary_key:
+                continue
             # For some dialects/data types we may not be able to construct an index. We just do our
             # best here instead of hard failing.
             try:
@@ -891,6 +900,7 @@ class Sampler:
                     schema,
                     table_q,
                     name=table_name,
+                    primary_key=table.primary_key,
                     indexes=joined_columns[(schema, table_name)],
                 )
             )
@@ -914,6 +924,7 @@ class Sampler:
                         schema,
                         meta.temp_tables[(schema, table_name, 0)].select(),
                         name=table_name,
+                        primary_key=table.primary_key,
                         indexes=joined_columns[(schema, table_name)],
                     )
                 )
