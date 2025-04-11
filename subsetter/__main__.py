@@ -158,7 +158,7 @@ def _main_plan(args):
             ctx = open(args.plan_output, "w", encoding="utf-8")
         with ctx as fplan:
             yaml.dump(
-                plan.dict(exclude_unset=True, by_alias=True),
+                plan.model_dump(exclude_unset=True, by_alias=True),
                 stream=fplan,
                 default_flow_style=False,
                 width=2**20,
