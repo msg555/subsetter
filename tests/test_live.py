@@ -54,7 +54,6 @@ DATABASE_CONFIGURATIONS = [
     pytest.param(
         db_config_mysql,
         marks=[
-            pytest.mark.usefixtures("mysql_proc"),
             pytest.mark.mysql_live,
         ],
         id="mysql",
@@ -62,7 +61,6 @@ DATABASE_CONFIGURATIONS = [
     pytest.param(
         db_config_postgres,
         marks=[
-            pytest.mark.usefixtures("postgresql_proc"),
             pytest.mark.postgres_live,
         ],
         id="postgres",
@@ -70,7 +68,6 @@ DATABASE_CONFIGURATIONS = [
     pytest.param(
         db_config_sqlite,
         marks=[
-            pytest.mark.usefixtures("sqlite_init_db"),
             pytest.mark.sqlite_live,
         ],
         id="sqlite",
