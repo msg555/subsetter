@@ -260,7 +260,7 @@ class SQLStatementSelect(BaseModel):
             stmt = sa.select(table_obj)
 
         if self.joins:
-            joined_cols: List[sa.ColumnExpression] = []
+            joined_cols: List[sa.ColumnElement] = []
             joined: sa.FromClause = table_obj
             exists_constraints: List[sa.ColumnExpressionArgument] = []
             for join in self.joins:  # pylint: disable=not-an-iterable

@@ -611,7 +611,7 @@ class DatabaseOutput(SamplerOutput):
         multiplier: int = 1,
         column_multipliers: Optional[Set[str]] = None,
     ) -> None:
-        (src_schema, src_table_name) = (schema, table_name)
+        src_schema, src_table_name = (schema, table_name)
         schema, table_name = self._remap_table(src_schema, src_table_name)
         table = self.meta.tables[(schema, table_name)]
 
