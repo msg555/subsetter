@@ -1,0 +1,149 @@
+dataset: poly
+
+plan_config:
+  targets:
+    test.musicians:
+      in:
+        sample: [1]
+  polymorphic_fks:
+  - table: test.musicians
+    columns: [instrument]
+    discriminator_column: instrument_type
+    destinations:
+      piano:
+        table: test.pianos
+        columns: [id]
+      trumpet:
+        table: test.trumpets
+        columns: [id]
+  - table: test.owners
+    columns: [instrument]
+    discriminator_column: instrument_type
+    destinations:
+      piano:
+        table: test.pianos
+        columns: [id]
+      trumpet:
+        table: test.trumpets
+        columns: [id]
+  select:
+  - test.*
+
+sample_config: {}
+
+expected_plan:
+  passthrough: []
+  queries:
+    test.musicians:
+      statement:
+        from:
+          schema: test
+          table: musicians
+        type: select
+        where:
+          columns:
+          - sample
+          type: in
+          values:
+          - - 1
+    test.owners:
+      statement:
+        from:
+          schema: test
+          table: owners
+        joins:
+        - - half_unique: true
+            left_columns:
+            - instrument
+            left_discriminator:
+            - instrument_type
+            - piano
+            right:
+              sampled: true
+              schema: test
+              table: pianos
+            right_columns:
+            - id
+            right_discriminator: []
+          - half_unique: true
+            left_columns:
+            - instrument
+            left_discriminator:
+            - instrument_type
+            - trumpet
+            right:
+              sampled: true
+              schema: test
+              table: trumpets
+            right_columns:
+            - id
+            right_discriminator: []
+        type: select
+    test.pianos:
+      statement:
+        from:
+          schema: test
+          table: pianos
+        joins:
+        - - half_unique: true
+            left_columns:
+            - id
+            left_discriminator: []
+            right:
+              sampled: true
+              schema: test
+              table: musicians
+            right_columns:
+            - instrument
+            right_discriminator:
+            - instrument_type
+            - piano
+        type: select
+    test.trumpets:
+      statement:
+        from:
+          schema: test
+          table: trumpets
+        joins:
+        - - half_unique: true
+            left_columns:
+            - id
+            left_discriminator: []
+            right:
+              sampled: true
+              schema: test
+              table: musicians
+            right_columns:
+            - instrument
+            right_discriminator:
+            - instrument_type
+            - trumpet
+        type: select
+
+expected_sample:
+  test_out.musicians:
+  - id: 2
+    name: peter
+    instrument_type: piano
+    instrument: 2
+    sample: 1
+  - id: 6
+    name: jackson
+    instrument_type: trumpet
+    instrument: 3
+    sample: 1
+  test_out.pianos:
+  - id: 2
+    name: silver
+  test_out.trumpets:
+  - id: 3
+    name: tres
+  test_out.owners:
+  - id: 5
+    name: rob
+    instrument_type: trumpet
+    instrument: 3
+  - id: 6
+    name: robert
+    instrument_type: piano
+    instrument: 2

@@ -21,16 +21,15 @@ expected_plan:
           schema: test
           table: bookmark
         joins:
-        - half_unique: true
-          left_columns:
-          - user_id
-          right:
-            sampled: true
-            schema: test
-            table: users
-          right_columns:
-          - id
-        joins_outer: false
+        - - half_unique: true
+            left_columns:
+            - user_id
+            right:
+              sampled: true
+              schema: test
+              table: users
+            right_columns:
+            - id
         type: select
     test.friends:
       statement:
@@ -50,25 +49,24 @@ expected_plan:
           schema: test
           table: referal_owners
         joins:
-        - half_unique: true
-          left_columns:
-          - referal_id
-          right:
-            sampled: true
-            schema: test
-            table: referals
-          right_columns:
-          - id
-        - half_unique: true
-          left_columns:
-          - source_website_id
-          right:
-            sampled: true
-            schema: test
-            table: websites
-          right_columns:
-          - id
-        joins_outer: false
+        - - half_unique: true
+            left_columns:
+            - referal_id
+            right:
+              sampled: true
+              schema: test
+              table: referals
+            right_columns:
+            - id
+        - - half_unique: true
+            left_columns:
+            - source_website_id
+            right:
+              sampled: true
+              schema: test
+              table: websites
+            right_columns:
+            - id
         type: select
     test.referals:
       statement:
@@ -76,16 +74,15 @@ expected_plan:
           schema: test
           table: referals
         joins:
-        - half_unique: true
-          left_columns:
-          - website_id
-          right:
-            sampled: true
-            schema: test
-            table: websites
-          right_columns:
-          - id
-        joins_outer: false
+        - - half_unique: true
+            left_columns:
+            - website_id
+            right:
+              sampled: true
+              schema: test
+              table: websites
+            right_columns:
+            - id
         type: select
     test.users:
       statement:
@@ -93,25 +90,24 @@ expected_plan:
           schema: test
           table: users
         joins:
-        - half_unique: true
-          left_columns:
-          - id
-          right:
-            sampled: true
-            schema: test
-            table: friends
-          right_columns:
-          - friend_a
-        - half_unique: true
-          left_columns:
-          - id
-          right:
-            sampled: true
-            schema: test
-            table: friends
-          right_columns:
-          - friend_b
-        joins_outer: true
+        - - half_unique: true
+            left_columns:
+            - id
+            right:
+              sampled: true
+              schema: test
+              table: friends
+            right_columns:
+            - friend_a
+          - half_unique: true
+            left_columns:
+            - id
+            right:
+              sampled: true
+              schema: test
+              table: friends
+            right_columns:
+            - friend_b
         type: select
     test.visits:
       statement:
@@ -119,16 +115,15 @@ expected_plan:
           schema: test
           table: visits
         joins:
-        - half_unique: true
-          left_columns:
-          - user_id
-          right:
-            sampled: true
-            schema: test
-            table: users
-          right_columns:
-          - id
-        joins_outer: false
+        - - half_unique: true
+            left_columns:
+            - user_id
+            right:
+              sampled: true
+              schema: test
+              table: users
+            right_columns:
+            - id
         type: select
     test.websites:
       statement:
@@ -136,25 +131,24 @@ expected_plan:
           schema: test
           table: websites
         joins:
-        - half_unique: true
-          left_columns:
-          - id
-          right:
-            sampled: true
-            schema: test
-            table: bookmark
-          right_columns:
-          - website_id
-        - half_unique: true
-          left_columns:
-          - id
-          right:
-            sampled: true
-            schema: test
-            table: visits
-          right_columns:
-          - website_id
-        joins_outer: true
+        - - half_unique: true
+            left_columns:
+            - id
+            right:
+              sampled: true
+              schema: test
+              table: bookmark
+            right_columns:
+            - website_id
+          - half_unique: true
+            left_columns:
+            - id
+            right:
+              sampled: true
+              schema: test
+              table: visits
+            right_columns:
+            - website_id
         type: select
 
 expected_sample:

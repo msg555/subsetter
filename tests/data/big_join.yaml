@@ -36,16 +36,15 @@ expected_plan:
           schema: test
           table: users
         joins:
-        - half_unique: false
-          left_columns:
-          - state
-          right:
-            sampled: true
-            schema: test
-            table: homes
-          right_columns:
-          - state
-        joins_outer: true
+        - - half_unique: false
+            left_columns:
+            - state
+            right:
+              sampled: true
+              schema: test
+              table: homes
+            right_columns:
+            - state
         type: select
 
 expected_sample:

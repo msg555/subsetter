@@ -237,6 +237,8 @@ class SQLLeftJoin(BaseModel):
     left_columns: List[str]
     right_columns: List[str]
     half_unique: bool = True
+    left_discriminator: List[str] = []
+    right_discriminator: List[str] = []
 
 
 class SQLStatementSelect(BaseModel):
@@ -245,8 +247,9 @@ class SQLStatementSelect(BaseModel):
     from_: SQLTableIdentifier = Field(..., alias="from")
     where: Optional[SQLWhereClause] = None
     limit: Optional[int] = None
-    joins: Optional[List[SQLLeftJoin]] = None
-    joins_outer: bool = False
+
+    # Joins are combined in CNF format - inner lists of joins must have one matching joined row
+    joins: List[List[SQLLeftJoin]] = []
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -259,50 +262,47 @@ class SQLStatementSelect(BaseModel):
         else:
             stmt = sa.select(table_obj)
 
-        if self.joins:
-            joined_cols: List[sa.ColumnElement] = []
-            joined: sa.FromClause = table_obj
-            exists_constraints: List[sa.ColumnExpressionArgument] = []
-            for join in self.joins:  # pylint: disable=not-an-iterable
+        joined: sa.FromClause = table_obj
+        join_and_conditions = []
+        for join_list in self.joins:
+            join_or_conditions: List[sa.ColumnExpressionArgument] = []
+            for join in join_list:
                 right = join.right.build(context).alias()
+
+                join_on = [
+                    table_obj.c[lft_col] == right.c[rht_col]
+                    for lft_col, rht_col in zip(join.left_columns, join.right_columns)
+                ]
+                if join.left_discriminator:
+                    disc_col, disc_val = join.left_discriminator
+                    join_on.append(table_obj.c[disc_col] == disc_val)
+                if join.right_discriminator:
+                    disc_col, disc_val = join.right_discriminator
+                    join_on.append(right.c[disc_col] == disc_val)
 
                 if join.half_unique and table_obj.primary_key:
                     joined = joined.join(
                         right,
-                        onclause=sa.and_(
-                            *(
-                                table_obj.c[lft_col] == right.c[rht_col]
-                                for lft_col, rht_col in zip(
-                                    join.left_columns, join.right_columns
-                                )
-                            )
-                        ),
-                        isouter=self.joins_outer,
+                        onclause=sa.and_(*join_on),
+                        isouter=len(join_list) > 1,
                     )
-                    joined_cols.extend(
-                        right.c[rht_col] for rht_col in join.right_columns
-                    )
-                else:
-                    exists_constraints.append(
-                        sa.exists().where(
-                            *(
-                                table_obj.c[lft_col] == right.c[rht_col]
-                                for lft_col, rht_col in zip(
-                                    join.left_columns, join.right_columns
-                                )
-                            )
+                    if len(join_list) > 1:
+                        join_or_conditions.extend(
+                            right.c[rht_col].is_not(None)
+                            for rht_col in join.right_columns
                         )
-                    )
+                else:
+                    join_or_conditions.append(sa.exists().where(*join_on))
 
-            stmt = stmt.select_from(joined)
-            if joined is not table_obj:
-                stmt = stmt.group_by(*table_obj.primary_key.columns)
+            if join_or_conditions:
+                join_and_conditions.append(sa.or_(*join_or_conditions))
 
-            if self.joins_outer:
-                exists_constraints.extend(col.is_not(None) for col in joined_cols)
-                stmt = stmt.where(sa.or_(*exists_constraints))
-            elif exists_constraints:
-                stmt = stmt.where(sa.and_(*exists_constraints))
+        stmt = stmt.select_from(joined)
+        if joined is not table_obj:
+            stmt = stmt.group_by(*table_obj.primary_key.columns)
+
+        if join_and_conditions:
+            stmt = stmt.where(sa.and_(*join_and_conditions))
 
         if self.where:
             stmt = stmt.where(self.where.build(context, table_obj))
@@ -329,7 +329,6 @@ class SQLStatementSelect(BaseModel):
             kwargs["limit"] = self.limit
         if self.joins:
             kwargs["joins"] = self.joins
-            kwargs["joins_outer"] = self.joins_outer
 
         return SQLStatementSelect(**kwargs)  # type: ignore
 

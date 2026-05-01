@@ -43,6 +43,32 @@ class PlannerConfig(ForbidBaseModel):
                 raise ValueError("each column in src_columns must be unique")
             return self
 
+    class PolymorphicFKConfig(ForbidBaseModel):
+        class KeyDestination(ForbidBaseModel):
+            table: str
+            columns: List[str]
+
+        table: str
+        columns: List[str]
+        discriminator_column: str
+        destinations: dict[str, KeyDestination]
+
+        @model_validator(mode="after")
+        def check_columns_match(self):
+            col_count = len(self.columns)
+            if not col_count:
+                raise ValueError("columns cannot be empty")
+            if len(set(self.columns)) != col_count:
+                raise ValueError("each column in columns must be unique")
+            for key_dest in self.destinations.values():
+                if len(key_dest.columns) != col_count:
+                    raise ValueError(
+                        "src_columns and dst_columns must be the same length"
+                    )
+                if len(set(key_dest.columns)) != col_count:
+                    raise ValueError("each column in src_columns must be unique")
+            return self
+
     class ColumnConstraint(ForbidBaseModel):
         column: str
         operator: SQLKnownOperator
@@ -55,6 +81,7 @@ class PlannerConfig(ForbidBaseModel):
     passthrough: List[str] = []
     ignore_fks: List[IgnoreFKConfig] = []
     extra_fks: List[ExtraFKConfig] = []
+    polymorphic_fks: List[PolymorphicFKConfig] = []
     infer_foreign_keys: Literal["none", "schema", "all"] = "none"
     include_dependencies: bool = True
 

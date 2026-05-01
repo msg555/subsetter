@@ -241,7 +241,7 @@ def pydantic_search(root: Any) -> Iterable[BaseModel]:
         data = stack.pop()
         if isinstance(data, BaseModel):
             yield data
-            for field, _ in data.model_fields.items():
+            for field, _ in data.__class__.model_fields.items():
                 _push(field, getattr(data, field))
 
         if isinstance(data, list):
