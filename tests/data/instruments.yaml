@@ -28,16 +28,15 @@ expected_plan:
           schema: test
           table: instruments
         joins:
-        - half_unique: true
-          left_columns:
-          - owner_id
-          right:
-            sampled: true
-            schema: test
-            table: owners
-          right_columns:
-          - id
-        joins_outer: false
+        - - half_unique: true
+            left_columns:
+            - owner_id
+            right:
+              sampled: true
+              schema: test
+              table: owners
+            right_columns:
+            - id
         type: select
     test.owners:
       statement:

@@ -1,0 +1,36 @@
+tables:
+  test.musicians:
+    primary_key: [id]
+    columns: [id, name|str, instrument_type|str, instrument, sample]
+  test.owners:
+    primary_key: [id]
+    columns: [id, name|str, instrument_type|str, instrument]
+  test.pianos:
+    primary_key: [id]
+    columns: [id, name|str]
+  test.trumpets:
+    primary_key: [id]
+    columns: [id, name|str]
+data:
+  test.musicians:
+    - [1, jack, piano, 1, 0]
+    - [2, peter, piano, 2, 1]
+    - [3, jasmine, trumpet, 1, 0]
+    - [4, walter, trumpet, 2, 0]
+    - [5, david, piano, 3, 0]
+    - [6, jackson, trumpet, 3, 1]
+  test.owners:
+    - [1, bob, trumpet, 2]
+    - [2, alice, trumpet, 1]
+    - [3, bobby, piano, 1]
+    - [4, robby, piano, 3]
+    - [5, rob, trumpet, 3]
+    - [6, robert, piano, 2]
+  test.pianos:
+    - [1, gold]
+    - [2, silver]
+    - [3, bronze]
+  test.trumpets:
+    - [1, uno]
+    - [2, dos]
+    - [3, tres]

@@ -1,3 +1,9 @@
+# v0.4.5
+
+- Added support for polymorphic foreign keys
+- Removed Python 3.8, 3.9 support and added 3.13, 3.14 support
+- Updated dependencies
+
 # v0.4.4
 
 - Improved query performance following foreign key relationships

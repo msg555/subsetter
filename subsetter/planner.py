@@ -69,6 +69,7 @@ class Planner:
             )
         self._remove_ignore_fks()
         self._add_extra_fks()
+        self._add_polymorphic_fks()
         if self.config.include_dependencies:
             self._check_ignore_tables()
         self._check_passthrough_tables()
@@ -202,6 +203,85 @@ class Planner:
                 ),
             )
 
+    def _add_polymorphic_fks(self) -> None:
+        """Add in configured polymorphic foreign keys requested."""
+        for index, poly_fk in enumerate(self.config.polymorphic_fks):
+            src_schema, src_table_name = parse_table_name(poly_fk.table)
+            table = self.meta.tables.get((src_schema, src_table_name))
+            if table is None:
+                LOGGER.warning(
+                    "Found no source table %s.%s referenced in polymorphic_fks[%d]",
+                    src_schema,
+                    src_table_name,
+                    index,
+                )
+                continue
+
+            src_missing_cols = {
+                col for col in poly_fk.columns if col not in table.table_obj.columns
+            }
+            if src_missing_cols:
+                LOGGER.warning(
+                    "Columns %s do not exist in %s.%s referenced in poly_fks[%d]",
+                    src_missing_cols,
+                    src_schema,
+                    src_table_name,
+                    index,
+                )
+                continue
+
+            if poly_fk.discriminator_column not in table.table_obj.columns:
+                LOGGER.warning(
+                    "Column %s does not exist in %s.%s referenced in poly_fks[%d].discriminator_column",
+                    poly_fk.discriminator_column,
+                    src_schema,
+                    src_table_name,
+                    index,
+                )
+                continue
+
+            for discriminator_value, key_dest in poly_fk.destinations.items():
+                dst_schema, dst_table_name = parse_table_name(key_dest.table)
+                dst_table = self.meta.tables.get((dst_schema, dst_table_name))
+                if dst_table is None:
+                    LOGGER.warning(
+                        "Found no destination table %s.%s referenced in poly_fks[%d].destinations[%s]",
+                        dst_schema,
+                        dst_table_name,
+                        index,
+                        discriminator_value,
+                    )
+                    continue
+
+                dst_missing_cols = {
+                    col
+                    for col in key_dest.columns
+                    if col not in dst_table.table_obj.columns
+                }
+                if dst_missing_cols:
+                    LOGGER.warning(
+                        "Columns %s do not exist in %s.%s referenced in poly_fks[%d].destinations[%s]",
+                        dst_missing_cols,
+                        dst_schema,
+                        dst_table_name,
+                        index,
+                        discriminator_value,
+                    )
+                    continue
+
+                table.foreign_keys.append(
+                    ForeignKey(
+                        columns=tuple(poly_fk.columns),
+                        dst_schema=dst_schema,
+                        dst_table=dst_table_name,
+                        dst_columns=tuple(key_dest.columns),
+                        src_discriminator=(
+                            poly_fk.discriminator_column,
+                            discriminator_value,
+                        ),
+                    ),
+                )
+
     def _remove_ignore_fks(self) -> None:
         """Remove requested foreign keys"""
         for ignore_fk in self.config.ignore_fks:
@@ -322,24 +402,51 @@ class Planner:
                         return True
             return False
 
+        # Create joins in conjunctive normal form.
+        fks_to_join = []
+
+        # reverse foreign keys just get OR'ed together
+        if rev_foreign_keys:
+            fks_to_join.append(rev_foreign_keys)
+
+        # forward foreign keys get AND'ed except for polymorphic fks which OR when using the same
+        # discriminator column.
+        fk_disc_index: dict[str, int] = {}
+        for fk in foreign_keys:
+            if fk.src_discriminator:
+                disc_col = fk.src_discriminator[0]
+                if disc_col in fk_disc_index:
+                    fks_to_join[fk_disc_index[disc_col]].append(fk)
+                else:
+                    fk_disc_index[disc_col] = len(fks_to_join)
+                    fks_to_join.append([fk])
+            else:
+                fks_to_join.append([fk])
+
         fk_joins = []
-        for fk in foreign_keys or rev_foreign_keys:
-            dst_table = self.meta.tables[(fk.dst_schema, fk.dst_table)]
-            half_unique = _is_distinct(table.table_obj, fk.columns) or _is_distinct(
-                dst_table.table_obj, fk.dst_columns
-            )
-            fk_joins.append(
-                SQLLeftJoin(
-                    right=SQLTableIdentifier(
-                        table_schema=fk.dst_schema,
-                        table_name=fk.dst_table,
-                        sampled=True,
-                    ),
-                    left_columns=list(fk.columns),
-                    right_columns=list(fk.dst_columns),
-                    half_unique=half_unique,
+        for fk_join_list in fks_to_join:
+            or_joins = []
+            for fk in fk_join_list:
+                dst_table = self.meta.tables[(fk.dst_schema, fk.dst_table)]
+                half_unique = _is_distinct(table.table_obj, fk.columns) or _is_distinct(
+                    dst_table.table_obj, fk.dst_columns
                 )
-            )
+
+                or_joins.append(
+                    SQLLeftJoin(
+                        right=SQLTableIdentifier(
+                            table_schema=fk.dst_schema,
+                            table_name=fk.dst_table,
+                            sampled=True,
+                        ),
+                        left_columns=list(fk.columns),
+                        right_columns=list(fk.dst_columns),
+                        half_unique=half_unique,
+                        left_discriminator=list(fk.src_discriminator or ()),
+                        right_discriminator=list(fk.dst_discriminator or ()),
+                    )
+                )
+            fk_joins.append(or_joins)
 
         conf_constraints = self.config.table_constraints.get(
             f"{table.schema}.{table.name}", []

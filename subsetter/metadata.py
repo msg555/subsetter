@@ -22,6 +22,8 @@ class ForeignKey:
     dst_schema: str
     dst_table: str
     dst_columns: Tuple[str, ...]
+    src_discriminator: Optional[Tuple[str, str]] = None
+    dst_discriminator: Optional[Tuple[str, str]] = None
 
     @classmethod
     def from_schema(cls, fk: sa.ForeignKeyConstraint) -> "ForeignKey":
@@ -188,6 +190,8 @@ class DatabaseMetadata:
                         dst_schema=table.schema,
                         dst_table=table.name,
                         dst_columns=fk.columns,
+                        src_discriminator=fk.dst_discriminator,
+                        dst_discriminator=fk.src_discriminator,
                     )
                 )
 

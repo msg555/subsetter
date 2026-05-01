@@ -18,16 +18,15 @@ expected_plan:
           schema: test
           table: order_status
         joins:
-        - half_unique: true
-          left_columns:
-          - order_id
-          right:
-            sampled: true
-            schema: test
-            table: orders
-          right_columns:
-          - id
-        joins_outer: false
+        - - half_unique: true
+            left_columns:
+            - order_id
+            right:
+              sampled: true
+              schema: test
+              table: orders
+            right_columns:
+            - id
         type: select
     test.orders:
       statement:
@@ -35,16 +34,15 @@ expected_plan:
           schema: test
           table: orders
         joins:
-        - half_unique: true
-          left_columns:
-          - user_id
-          right:
-            sampled: true
-            schema: test
-            table: users
-          right_columns:
-          - id
-        joins_outer: false
+        - - half_unique: true
+            left_columns:
+            - user_id
+            right:
+              sampled: true
+              schema: test
+              table: users
+            right_columns:
+            - id
         type: select
     test.users:
       statement:
