@@ -1,5 +1,6 @@
 # v0.4.5
 
+- Improved support for sampling rows when they have null fks
 - Added support for polymorphic foreign keys
 - Removed Python 3.8, 3.9 support and added 3.13, 3.14 support
 - Updated dependencies

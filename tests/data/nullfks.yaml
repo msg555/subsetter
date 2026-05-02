@@ -1,0 +1,206 @@
+dataset: nullfks
+
+plan_config:
+  targets:
+    test.a:
+      in:
+        sample: [1]
+  polymorphic_fks:
+  - table: test.d
+    columns: [x_id]
+    discriminator_column: x_t
+    destinations:
+      b:
+        table: test.b
+        columns: [id]
+      c:
+        table: test.c
+        columns: [id]
+      e:
+        table: test.e
+        columns: [id]
+  select:
+  - test.*
+
+sample_config: {}
+
+expected_plan:
+  passthrough: []
+  queries:
+    test.a:
+      statement:
+        from:
+          schema: test
+          table: a
+        type: select
+        where:
+          columns:
+          - sample
+          type: in
+          values:
+          - - 1
+    test.b:
+      statement:
+        from:
+          schema: test
+          table: b
+        joins:
+        - - half_unique: true
+            left_columns:
+            - a_id
+            left_discriminator: []
+            right:
+              sampled: true
+              schema: test
+              table: a
+            right_columns:
+            - id
+            right_discriminator: []
+        type: select
+    test.c:
+      statement:
+        from:
+          schema: test
+          table: c
+        joins:
+        - - half_unique: true
+            left_columns:
+            - a_id
+            left_discriminator: []
+            right:
+              sampled: true
+              schema: test
+              table: a
+            right_columns:
+            - id
+            right_discriminator: []
+        - - half_unique: true
+            left_columns:
+            - b_id
+            left_discriminator: []
+            right:
+              sampled: true
+              schema: test
+              table: b
+            right_columns:
+            - id
+            right_discriminator: []
+        type: select
+    test.d:
+      statement:
+        from:
+          schema: test
+          table: d
+        joins:
+        - - half_unique: true
+            left_columns:
+            - a_id
+            left_discriminator: []
+            right:
+              sampled: true
+              schema: test
+              table: a
+            right_columns:
+            - id
+            right_discriminator: []
+        - - half_unique: true
+            left_columns:
+            - x_id
+            left_discriminator:
+            - x_t
+            - b
+            right:
+              sampled: true
+              schema: test
+              table: b
+            right_columns:
+            - id
+            right_discriminator: []
+          - half_unique: true
+            left_columns:
+            - x_id
+            left_discriminator:
+            - x_t
+            - c
+            right:
+              sampled: true
+              schema: test
+              table: c
+            right_columns:
+            - id
+            right_discriminator: []
+        type: select
+    test.e:
+      statement:
+        from:
+          schema: test
+          table: e
+        joins:
+        - - half_unique: true
+            left_columns:
+            - id
+            left_discriminator: []
+            right:
+              sampled: true
+              schema: test
+              table: d
+            right_columns:
+            - x_id
+            right_discriminator:
+            - x_t
+            - e
+        type: select
+
+
+expected_sample:
+  test_out.a:
+  - id: 1
+    sample: 1
+  - id: 2
+    sample: 1
+  - id: 3
+    sample: 1
+  - id: 4
+    sample: 1
+  test_out.b:
+  - id: 1
+    a_id: 1
+  - id: 2
+    a_id: 4
+  test_out.c:
+  - id: 2
+    a_id: 1
+    b_id: null
+  - id: 3
+    a_id: null
+    b_id: 1
+  - id: 4
+    a_id: 1
+    b_id: 1
+  - id: 8
+    a_id: 2
+    b_id: 2
+  test_out.d:
+  - id: 1
+    a_id: 1
+    x_t: b
+    x_id: 1
+  - id: 3
+    a_id: 3
+    x_t: c
+    x_id: 4
+  - id: 5
+    a_id: 1
+    x_t: e
+    x_id: 1
+  - id: 6
+    a_id: 4
+    x_t: e
+    x_id: 3
+  - id: 7
+    a_id: 3
+    x_t: b
+    x_id: null
+  test_out.e:
+  - id: 1
+  - id: 3

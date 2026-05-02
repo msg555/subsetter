@@ -432,6 +432,10 @@ class Planner:
                     dst_table.table_obj, fk.dst_columns
                 )
 
+                # TODO
+                # When grouping on a discrimated column in the forward fk case we should also permit
+                # rows that do not have a matching discriminator column
+
                 or_joins.append(
                     SQLLeftJoin(
                         right=SQLTableIdentifier(

@@ -264,8 +264,40 @@ class SQLStatementSelect(BaseModel):
 
         joined: sa.FromClause = table_obj
         join_and_conditions = []
+        all_ignore_conditions = []
         for join_list in self.joins:
             join_or_conditions: List[sa.ColumnExpressionArgument] = []
+
+            ignore_condition = None
+            if len(self.joins) > 1:
+                if join_list[0].left_discriminator:
+                    if all(
+                        join.left_columns == join_list[0].left_columns
+                        and join.left_discriminator[0]
+                        == join_list[0].left_discriminator[0]
+                        for join in join_list[1:]
+                    ):
+                        ignore_condition = sa.or_(
+                            sa.and_(
+                                *(
+                                    table_obj.c[lft_col].is_(None)
+                                    for lft_col in join_list[0].left_columns
+                                )
+                            ),
+                            sa.not_(
+                                table_obj.c[join_list[0].left_discriminator[0]].in_(
+                                    [join.left_discriminator[1] for join in join_list]
+                                )
+                            ),
+                        )
+                elif len(join_list) == 1:
+                    ignore_condition = sa.and_(
+                        *(
+                            table_obj.c[lft_col].is_(None)
+                            for lft_col in join_list[0].left_columns
+                        )
+                    )
+
             for join in join_list:
                 right = join.right.build(context).alias()
 
@@ -281,12 +313,13 @@ class SQLStatementSelect(BaseModel):
                     join_on.append(right.c[disc_col] == disc_val)
 
                 if join.half_unique and table_obj.primary_key:
+                    isouter = len(join_list) > 1 or ignore_condition is not None
                     joined = joined.join(
                         right,
                         onclause=sa.and_(*join_on),
-                        isouter=len(join_list) > 1,
+                        isouter=isouter,
                     )
-                    if len(join_list) > 1:
+                    if isouter:
                         join_or_conditions.extend(
                             right.c[rht_col].is_not(None)
                             for rht_col in join.right_columns
@@ -294,8 +327,15 @@ class SQLStatementSelect(BaseModel):
                 else:
                     join_or_conditions.append(sa.exists().where(*join_on))
 
+            if ignore_condition is not None:
+                all_ignore_conditions.append(ignore_condition)
+                join_or_conditions.append(ignore_condition)
+
             if join_or_conditions:
                 join_and_conditions.append(sa.or_(*join_or_conditions))
+
+        if all_ignore_conditions and len(all_ignore_conditions) == len(self.joins):
+            join_and_conditions.append(sa.not_(sa.and_(*all_ignore_conditions)))
 
         stmt = stmt.select_from(joined)
         if joined is not table_obj:
