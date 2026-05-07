@@ -1,6 +1,6 @@
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from typing_extensions import Annotated
 
 from subsetter.common import DatabaseConfig, SQLKnownOperator, SQLLiteralType
@@ -82,7 +82,10 @@ class PlannerConfig(ForbidBaseModel):
     ignore_fks: List[IgnoreFKConfig] = []
     extra_fks: List[ExtraFKConfig] = []
     polymorphic_fks: List[PolymorphicFKConfig] = []
-    infer_foreign_keys: Literal["none", "schema", "all"] = "none"
+    infer_fks: Literal["none", "shema", "all"] = Field(
+        "none", validation_alias=AliasChoices("infer_fks", "infer_foreign_keys")
+    )
+    infer_fks_ignore_tables: List[str] = []
     include_dependencies: bool = True
 
 
