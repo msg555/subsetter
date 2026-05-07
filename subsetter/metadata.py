@@ -2,7 +2,7 @@ import collections
 import dataclasses
 import logging
 from fnmatch import fnmatch
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import sqlalchemy as sa
 
@@ -40,6 +40,8 @@ class TableMetadata:
     def __init__(
         self,
         table_obj: sa.Table,
+        *,
+        table_set: Optional[Set[Tuple[str, str]]] = None,
     ) -> None:
         assert table_obj.schema is not None
         self.table_obj = table_obj
@@ -49,7 +51,10 @@ class TableMetadata:
             column.name for column in table_obj.primary_key.columns
         )
         self.foreign_keys = [
-            ForeignKey.from_schema(fk) for fk in table_obj.foreign_key_constraints
+            ForeignKey.from_schema(fk)
+            for fk in table_obj.foreign_key_constraints
+            if table_set is None
+            or (fk.referred_table.schema, fk.referred_table.name) in table_set
         ]
         self.rev_foreign_keys: List[ForeignKey] = []
 
@@ -123,7 +128,8 @@ class DatabaseMetadata:
                 metadata_obj,
                 {
                     (schema, table): TableMetadata(
-                        metadata_obj.tables[f"{schema}.{table}"]
+                        metadata_obj.tables[f"{schema}.{table}"],
+                        table_set=table_set,
                     )
                     for schema, table in table_queue
                 },
@@ -137,15 +143,24 @@ class DatabaseMetadata:
             raise ValueError("Table schema must be set")
         self.tables[(table_obj.schema, table_obj.name)] = TableMetadata(table_obj)
 
-    def infer_missing_foreign_keys(self, *, infer_all: bool = False) -> None:
+    def infer_missing_foreign_keys(
+        self,
+        *,
+        infer_all: bool = False,
+        ignore_tables: Iterable[Tuple[str, str]] = (),
+    ) -> None:
         def _key_pk(schema: str, pk: Tuple[str, ...]):
             if infer_all:
                 return pk
             return (schema, pk)
 
+        ignore_tables_st = set(ignore_tables)
+
         pk_map: Dict[Tuple[str, Tuple[str, ...]], Optional[TableMetadata]] = {}
         for table in self.tables.values():
             if not table.primary_key:
+                continue
+            if (table.schema, table.name) in ignore_tables_st:
                 continue
 
             map_key = _key_pk(table.schema, table.primary_key)

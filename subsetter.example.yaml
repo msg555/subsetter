@@ -116,12 +116,16 @@ planner:
   # keys. It does this by inferring that a column name that matches the name
   # of a primary key column should function as a foreign key to that table.
   # If set to 'schema' will limit matches to tables within the same schema.
-  infer_foreign_keys: none # can be 'none', 'schema', or 'all'
+  infer_fks: none # can be 'none', 'schema', or 'all'
+
+  # Do not attempt to infer foreign keys to these tables.
+  infer_fks_ignore_tables:
+  - db2.gizmos-foo
 
   # By default the subsetter will automatically pull in tables referenced by
   # tables already being selected to ensure their dependent rows can be pulled
-  # in with sampling. If this behavior is not desired you can set this value to
-  # false.
+  # in with sampling. Generally this behavior is desired otherwise foreign key
+  # constraints are likely to be violated at sample time.
   include_dependencies: true
 
 # Optional sampler config. Will write sample output to a directory named
