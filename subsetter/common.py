@@ -165,6 +165,7 @@ class DatabaseConfig(BaseModel):
     isolation_level: Optional[IsolationLevel] = None
     ssl: SSLConfig = SSLConfig()
     echo: bool = False
+    plugins: list[str] = []
 
     def database_url(
         self,
@@ -200,6 +201,7 @@ class DatabaseConfig(BaseModel):
                 env_prefix=env_prefix,
             ),
             echo=self.echo,
+            plugins=self.plugins,
         )
 
         @sa.event.listens_for(engine, "connect")

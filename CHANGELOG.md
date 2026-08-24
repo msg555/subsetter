@@ -1,3 +1,7 @@
+# v0.4.6
+
+- Added `plugins` option to add custom plugins to sqlalchemy engine (e.g. geoalchemy)
+
 # v0.4.5
 
 - Change `infer_foreign_keys` option to `infer_fks` to match other option names (old name still works)
