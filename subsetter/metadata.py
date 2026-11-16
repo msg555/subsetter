@@ -192,8 +192,16 @@ class DatabaseMetadata:
                         table.foreign_keys.append(fk)
 
     def toposort(self) -> List[TableMetadata]:
+        """
+        Returns tables ordered so that each table appears after every table it
+        references. Self-referencing foreign keys are ignored as they do not
+        constrain the order between tables.
+        """
+        graph = self.as_graph()
+        for u, edges in graph.items():
+            edges.discard(u)
         return [  # type: ignore
-            self.tables[parse_table_name(u)] for u in toposort(self.as_graph())
+            self.tables[parse_table_name(u)] for u in toposort(graph)
         ]
 
     def compute_reverse_keys(self) -> None:

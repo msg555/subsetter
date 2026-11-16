@@ -123,3 +123,8 @@ def test_poly_join(db_config):
 @pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
 def test_nullfks_join(db_config):
     do_dataset_test(db_config, "nullfks")
+
+
+@pytest.mark.parametrize("db_config", DATABASE_CONFIGURATIONS, indirect=True)
+def test_selfref(db_config):
+    do_dataset_test(db_config, "selfref")

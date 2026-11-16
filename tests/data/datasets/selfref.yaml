@@ -1,0 +1,27 @@
+tables:
+  test.employees:
+    primary_key: [id]
+    columns: [id, manager_id, sample]
+    foreign_keys:
+      - columns: [manager_id]
+        dst_table: test.employees
+        dst_columns: [id]
+  test.tasks:
+    primary_key: [id]
+    columns: [id, employee_id]
+    foreign_keys:
+      - columns: [employee_id]
+        dst_table: test.employees
+        dst_columns: [id]
+data:
+  test.employees:
+    - [1, null, 1]
+    - [2, 1, 1]
+    - [3, 1, 1]
+    - [4, 2, 0]
+    - [5, null, 0]
+  test.tasks:
+    - [1, 1]
+    - [2, 3]
+    - [3, 4]
+    - [4, 5]

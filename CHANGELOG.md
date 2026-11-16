@@ -1,3 +1,11 @@
+# v0.4.7
+
+- Dropped support for Python 3.10, added support for Python 3.15
+- Ignore self-edges when sampling. This allows sampling tables with self
+  references as long as the user ensures there are no hanging foreign keys in
+  the sampled data either through sampling constraints or filters.
+- Setup pypi trusted publishing
+
 # v0.4.6
 
 - Added `plugins` option to add custom plugins to sqlalchemy engine (e.g. geoalchemy)

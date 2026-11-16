@@ -1,0 +1,62 @@
+dataset: selfref
+
+plan_config:
+  targets:
+    test.employees:
+      in:
+        sample: [1]
+  ignore_fks:
+  - src_table: test.employees
+    dst_table: test.employees
+  select:
+  - test.*
+
+sample_config: {}
+
+expected_plan:
+  queries:
+    test.employees:
+      statement:
+        from:
+          schema: test
+          table: employees
+        type: select
+        where:
+          columns:
+          - sample
+          type: in
+          values:
+          - - 1
+    test.tasks:
+      statement:
+        from:
+          schema: test
+          table: tasks
+        joins:
+        - - half_unique: true
+            left_columns:
+            - employee_id
+            right:
+              sampled: true
+              schema: test
+              table: employees
+            right_columns:
+            - id
+        type: select
+
+expected_sample:
+  test_out.employees:
+  - id: 1
+    manager_id: null
+    sample: 1
+  - id: 2
+    manager_id: 1
+    sample: 1
+  - id: 3
+    manager_id: 1
+    sample: 1
+  test_out.tasks:
+  - id: 1
+    employee_id: 1
+  - id: 2
+    employee_id: 3

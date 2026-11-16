@@ -372,25 +372,23 @@ class FilterUuid(FilterColumns):
         return (str(uuid4()) for _ in values)
 
 
-class FilterFakeColumns(FilterColumns):
-    def __init__(
-        self,
-        columns_in: Iterable[str],
-        columns_act: Iterable[str],
-        *,
-        unique: bool = False,
-        faker: Optional[Faker] = None,
-    ):
-        super().__init__(columns_in, columns_act)
-        faker = faker or Faker()
-        self.faker: Faker = faker.unique if unique else faker  # type: ignore
-
-
-FAKER_CONFIG_CLASSES = []
+FAKER_CONFIG_CLASSES: list[type[SingleFilterConfig]] = []
 
 
 def _simple_faker_class(op_name: str, faker_op: Callable[[Faker], Any]):
-    class FilterFakeOper(FilterFakeColumns):
+    class FilterFakeOper(FilterColumns):
+        def __init__(
+            self,
+            columns_in: Iterable[str],
+            columns_act: Iterable[str],
+            *,
+            unique: bool = False,
+            faker: Optional[Faker] = None,
+        ):
+            super().__init__(columns_in, columns_act)
+            faker = faker or Faker()
+            self.faker: Faker = faker.unique if unique else faker  # type: ignore
+
         class Config(SingleFilterConfig):
             op: Literal[op_name]  # type: ignore
             columns: List[str]
